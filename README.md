@@ -27,7 +27,7 @@ import { runHybridSearch, type SearchSource } from '@papercusp/search';
 
 const result = await runHybridSearch(sources, {
   sql: ctx.tx,              // the PG handle
-  query, workspaceId, harnessFilter, limit,
+  query, workspaceId, scopeFilter, limit, // scopeFilter: optional intra-workspace scope key, or null
   mode: 'hybrid',
   embedder: await buildQueryEmbedder(), // host-provided, may be null
   log: ctx.log,
