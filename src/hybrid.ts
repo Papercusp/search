@@ -16,7 +16,7 @@ export interface SearchContext {
   sql: PgHandle;
   query: string;
   workspaceId: string;
-  harnessFilter: string | null;
+  scopeFilter: string | null;
   /** Final result cap (sources may over-fetch internally). */
   limit: number;
   log?: (msg: string) => void;
@@ -39,7 +39,7 @@ export async function runFullTextSearch(
         sql: ctx.sql,
         query: ctx.query,
         workspaceId: ctx.workspaceId,
-        harnessFilter: ctx.harnessFilter,
+        scopeFilter: ctx.scopeFilter,
         limit: ctx.limit,
       });
       for (const item of listing) hits.push(item.row);
@@ -89,7 +89,7 @@ export async function runHybridSearch(
           sql: ctx.sql,
           query: ctx.query,
           workspaceId: ctx.workspaceId,
-          harnessFilter: ctx.harnessFilter,
+          scopeFilter: ctx.scopeFilter,
           limit: candidateLimit,
         });
         inputs.push({ name: 'bm25', list });
@@ -108,7 +108,7 @@ export async function runHybridSearch(
           sql: ctx.sql,
           query: ctx.query,
           workspaceId: ctx.workspaceId,
-          harnessFilter: ctx.harnessFilter,
+          scopeFilter: ctx.scopeFilter,
           limit: candidateLimit,
           qVec,
         });

@@ -48,7 +48,7 @@ function fakeSource(
   return src;
 }
 
-const baseCtx: SearchContext = { sql, query: 'q', workspaceId: 'w', harnessFilter: null, limit: 5 };
+const baseCtx: SearchContext = { sql, query: 'q', workspaceId: 'w', scopeFilter: null, limit: 5 };
 
 describe('runFullTextSearch', () => {
   it('fans out across sources, re-ranks globally by score, reports totalHits', async () => {

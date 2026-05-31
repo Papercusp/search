@@ -12,7 +12,8 @@ export interface SearchHit {
   /** Source/ranker label, e.g. `escalations`. */
   source: string;
   source_id: string;
-  harness_slug?: string;
+  /** Optional intra-workspace partition key the hit belongs to (host-defined). */
+  scope?: string;
   /** First ~200 chars of the matched body. */
   excerpt: string;
   /** ts_headline snippet with <mark> around matched terms. */
@@ -31,8 +32,8 @@ export interface SearchSourceParams {
   sql: PgHandle;
   query: string;
   workspaceId: string;
-  /** When non-null, restrict to this harness slug (sources without a harness column ignore it). */
-  harnessFilter: string | null;
+  /** When non-null, restrict to this intra-workspace scope key (sources without a scope column ignore it). */
+  scopeFilter: string | null;
   /** Per-source row cap. fulltext passes `limit`; hybrid over-fetches (`limit*3`). */
   limit: number;
 }
