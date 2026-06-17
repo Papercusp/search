@@ -74,6 +74,57 @@ describe('runFullTextSearch', () => {
     expect(res.results.map((h) => h.source)).toEqual(['good']);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('bad skipped'));
   });
+
+  // ── GAP 13 — cross-source re-rank contract ───────────────────────────────
+  // `runFullTextSearch` (hybrid.ts:51) does ONE global sort by the raw,
+  // ranker-native score (`b.score - a.score`) across heterogeneous sources.
+  // These tests PIN that contract so a future change (e.g. a per-source score
+  // normalization, or switching to RRF fusion like the hybrid path) is a
+  // deliberate, test-visible decision rather than a silent regression.
+
+  it('GAP 13: cross-source ordering is by raw score, descending, regardless of source', async () => {
+    // Interleaved raw scores across two sources. The contract is that the raw
+    // ts_rank_cd-style number is treated as directly comparable across sources
+    // (NO per-source normalization) — so the merged order is purely score-desc.
+    const a = fakeSource('A', { bm25: [hit('A', '1', 0.9), hit('A', '2', 0.3)] });
+    const b = fakeSource('B', { bm25: [hit('B', '1', 0.5), hit('B', '2', 0.1)] });
+    const res = await runFullTextSearch([a, b], baseCtx);
+    expect(res.results.map((h) => `${h.source}:${h.source_id}`)).toEqual([
+      'A:1', // 0.9
+      'B:1', // 0.5
+      'A:2', // 0.3
+      'B:2', // 0.1
+    ]);
+  });
+
+  it('GAP 13: equal scores keep a STABLE order — earlier source first, then within-source order', async () => {
+    // Three hits all tied at 1.0 spanning two sources. A stable sort preserves
+    // insertion order: source A is fanned out before B, and within A the
+    // listing order is preserved. This pins determinism of the tie-break (no
+    // accidental reliance on an unstable sort).
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1.0), hit('A', '2', 1.0)] });
+    const b = fakeSource('B', { bm25: [hit('B', '1', 1.0)] });
+    const res = await runFullTextSearch([a, b], baseCtx);
+    expect(res.results.map((h) => `${h.source}:${h.source_id}`)).toEqual(['A:1', 'A:2', 'B:1']);
+
+    // And the tie-break is insensitive to the fan-out order ONLY in that it
+    // tracks it: swapping the source array swaps the tied order, proving the
+    // order is the (stable) fan-out order, not some hidden key.
+    const res2 = await runFullTextSearch([b, a], baseCtx);
+    expect(res2.results.map((h) => `${h.source}:${h.source_id}`)).toEqual(['B:1', 'A:1', 'A:2']);
+  });
+
+  it('GAP 13: overlapping source_ids across DIFFERENT sources are NOT deduped/fused', async () => {
+    // fulltext does NO fusion — two distinct sources can legitimately each have
+    // a hit with the same source_id (e.g. a shared harness_slug key). They must
+    // BOTH survive as separate rows (distinguished by `source`), not be merged.
+    const a = fakeSource('A', { bm25: [hit('A', 'shared', 0.8)] });
+    const b = fakeSource('B', { bm25: [hit('B', 'shared', 0.4)] });
+    const res = await runFullTextSearch([a, b], baseCtx);
+    expect(res.results).toHaveLength(2);
+    expect(res.results.map((h) => `${h.source}:${h.source_id}`)).toEqual(['A:shared', 'B:shared']);
+    expect(res.totalHits).toBe(2);
+  });
 });
 
 describe('runHybridSearch', () => {
