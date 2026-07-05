@@ -10,7 +10,7 @@
  */
 
 import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
-import type { SearchSource, SearchHit, Listing, PgHandle, Embedder } from './types';
+import type { SearchSource, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
 
 export interface SearchContext {
   sql: PgHandle;
@@ -19,6 +19,8 @@ export interface SearchContext {
   scopeFilter: string | null;
   /** Final result cap (sources may over-fetch internally). */
   limit: number;
+  /** Optional structured filters threaded to every source (P-002; sources opt in). */
+  filters?: SearchFilters;
   log?: (msg: string) => void;
 }
 
@@ -41,6 +43,7 @@ export async function runFullTextSearch(
         workspaceId: ctx.workspaceId,
         scopeFilter: ctx.scopeFilter,
         limit: ctx.limit,
+        filters: ctx.filters,
       });
       for (const item of listing) hits.push(item.row);
     } catch (err) {
@@ -91,6 +94,7 @@ export async function runHybridSearch(
           workspaceId: ctx.workspaceId,
           scopeFilter: ctx.scopeFilter,
           limit: candidateLimit,
+          filters: ctx.filters,
         });
         inputs.push({ name: 'bm25', list });
       } catch (err) {
@@ -111,6 +115,7 @@ export async function runHybridSearch(
           scopeFilter: ctx.scopeFilter,
           limit: candidateLimit,
           qVec,
+          filters: ctx.filters,
         });
         inputs.push({ name: 'embeddings', list });
       } catch (err) {

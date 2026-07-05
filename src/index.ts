@@ -20,6 +20,7 @@ export type {
   Listing,
   SearchSource,
   SearchSourceParams,
+  SearchFilters,
 } from './types';
 export {
   runFullTextSearch,

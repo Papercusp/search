@@ -27,6 +27,30 @@ export interface SearchHit {
 /** A single source's ranked list, keyed for RRF fusion. */
 export type Listing = RankedItem<SearchHit>[];
 
+/**
+ * Optional structured filters a host may pass alongside the query
+ * (session-search-scope-2026-07-05 P-002). Sources OPT IN: a source
+ * applies the filters it has columns for and ignores the rest, so
+ * passing a filter a source can't honor never errors — it just doesn't
+ * narrow that source. Hosts resolve domain concepts (e.g. a fleet or
+ * an audience selector) into the flat `owners` set BEFORE calling the
+ * engine — this lib stays domain-free.
+ */
+export interface SearchFilters {
+  /** Restrict to rows attributed to one of these owner ids (host-resolved set). */
+  owners?: string[];
+  /** Restrict to one turn speaker/role (e.g. 'user' | 'assistant' | 'tool'). */
+  speaker?: string;
+  /** Restrict to one session/conversation id. */
+  sessionId?: string;
+  /** Restrict to one source kind (e.g. a client/transport label). */
+  sourceKind?: string;
+  /** ISO timestamp inclusive lower bound. */
+  since?: string;
+  /** ISO timestamp exclusive upper bound. */
+  until?: string;
+}
+
 /** Inputs handed to a source's ranker functions. */
 export interface SearchSourceParams {
   sql: PgHandle;
@@ -36,6 +60,8 @@ export interface SearchSourceParams {
   scopeFilter: string | null;
   /** Per-source row cap. fulltext passes `limit`; hybrid over-fetches (`limit*3`). */
   limit: number;
+  /** Optional structured filters (see SearchFilters). Absent = no narrowing. */
+  filters?: SearchFilters;
 }
 
 /**
