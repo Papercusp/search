@@ -75,6 +75,26 @@ describe('runFullTextSearch', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('bad skipped'));
   });
 
+  // ── P-002 (session-search-scope-2026-07-05) — the filter bag is threaded ──
+  // The engine passes ctx.filters VERBATIM to every source call (bm25 AND
+  // embedding legs); an absent filters stays undefined (no accidental {}).
+  it('threads ctx.filters to every source call, verbatim', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)], embedding: [hit('A', '2', 1)] });
+    const filters = { owners: ['su-1'], speaker: 'assistant', since: '2026-07-01T00:00:00Z' };
+    await runFullTextSearch([a], { ...baseCtx, filters });
+    expect(a.bm25).toHaveBeenCalledWith(expect.objectContaining({ filters }));
+    const embedder: Embedder = async () => [0.1, 0.2];
+    await runHybridSearch([a], { ...baseCtx, filters, mode: 'hybrid', embedder });
+    expect(a.bm25).toHaveBeenLastCalledWith(expect.objectContaining({ filters }));
+    expect(a.embedding).toHaveBeenLastCalledWith(expect.objectContaining({ filters }));
+  });
+
+  it('omits filters entirely when the ctx carries none (sources see undefined)', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)] });
+    await runFullTextSearch([a], baseCtx);
+    expect(a.bm25).toHaveBeenCalledWith(expect.objectContaining({ filters: undefined }));
+  });
+
   // ── GAP 13 — cross-source re-rank contract ───────────────────────────────
   // `runFullTextSearch` (hybrid.ts:51) does ONE global sort by the raw,
   // ranker-native score (`b.score - a.score`) across heterogeneous sources.
