@@ -202,3 +202,75 @@ describe('runHybridSearch', () => {
     expect(res.results.map((h) => h.source)).toEqual(['good']);
   });
 });
+
+// ── Abort contract (2026-07-09 search-timeout hardening) ─────────────────────
+// A caller-supplied `ctx.signal` (route timeout watchdog / client gave up)
+// must stop the engine from STARTING further work and must REJECT — never a
+// silent partial result, and never swallowed by the skip-a-throwing-source
+// degradation path.
+describe('abort (ctx.signal) contract', () => {
+  const embedder: Embedder = async () => [0.1, 0.2, 0.3];
+
+  it('a pre-aborted signal rejects before any source or embedder call', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)], embedding: [hit('A', '1', 1)] });
+    const embedSpy = vi.fn(embedder);
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(runFullTextSearch([a], { ...baseCtx, signal: ctl.signal })).rejects.toThrow();
+    await expect(
+      runHybridSearch([a], { ...baseCtx, signal: ctl.signal, mode: 'hybrid', embedder: embedSpy }),
+    ).rejects.toThrow();
+    expect(a.bm25).not.toHaveBeenCalled();
+    expect(a.embedding).not.toHaveBeenCalled();
+    expect(embedSpy).not.toHaveBeenCalled();
+  });
+
+  it('aborting mid-pipeline stops later sources from starting', async () => {
+    const ctl = new AbortController();
+    const first: SearchSource = {
+      name: 'first',
+      bm25: vi.fn(async () => {
+        ctl.abort(); // abort fires while the first source is in flight
+        return listing(hit('first', '1', 1));
+      }),
+    };
+    const second = fakeSource('second', { bm25: [hit('second', '1', 1)] });
+    await expect(
+      runHybridSearch([first, second], { ...baseCtx, signal: ctl.signal, mode: 'hybrid', embedder: null }),
+    ).rejects.toThrow();
+    expect(second.bm25).not.toHaveBeenCalled();
+  });
+
+  it('an abort surfacing AS a source throw is rethrown, not skipped-and-degraded', async () => {
+    const ctl = new AbortController();
+    const src: SearchSource = {
+      name: 'aborty',
+      bm25: vi.fn(async () => {
+        ctl.abort();
+        throw new Error('query cancelled');
+      }),
+    };
+    const log = vi.fn();
+    await expect(runFullTextSearch([src], { ...baseCtx, signal: ctl.signal, log })).rejects.toThrow(
+      'query cancelled',
+    );
+    expect(log).not.toHaveBeenCalled(); // never logged as a "skipped" degradation
+  });
+
+  it('threads ctx.signal to every source call (bm25 + embedding legs)', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)], embedding: [hit('A', '1', 1)] });
+    const ctl = new AbortController();
+    await runHybridSearch([a], { ...baseCtx, signal: ctl.signal, mode: 'hybrid', embedder });
+    expect(a.bm25).toHaveBeenCalledWith(expect.objectContaining({ signal: ctl.signal }));
+    expect(a.embedding).toHaveBeenCalledWith(expect.objectContaining({ signal: ctl.signal }));
+    await runFullTextSearch([a], { ...baseCtx, signal: ctl.signal });
+    expect(a.bm25).toHaveBeenLastCalledWith(expect.objectContaining({ signal: ctl.signal }));
+  });
+
+  it('no signal (absent) keeps the legacy behavior — sources see signal: undefined', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)] });
+    const res = await runFullTextSearch([a], baseCtx);
+    expect(res.totalHits).toBe(1);
+    expect(a.bm25).toHaveBeenCalledWith(expect.objectContaining({ signal: undefined }));
+  });
+});

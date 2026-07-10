@@ -62,6 +62,11 @@ export interface SearchSourceParams {
   limit: number;
   /** Optional structured filters (see SearchFilters). Absent = no narrowing. */
   filters?: SearchFilters;
+  /** Optional abort signal threaded from the engine (SearchContext.signal).
+   *  Sources OPT IN — e.g. statement-level query cancellation. The engine
+   *  already stops STARTING new source calls once it aborts, so ignoring
+   *  this is safe (just less prompt). */
+  signal?: AbortSignal;
 }
 
 /**
