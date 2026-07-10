@@ -274,3 +274,62 @@ describe('abort (ctx.signal) contract', () => {
     expect(a.bm25).toHaveBeenCalledWith(expect.objectContaining({ signal: undefined }));
   });
 });
+
+// ── Embed budget (embedTimeoutMs) — 2026-07-10 interactive-search hardening ──
+// An interactive search (the desktop transcript pill) must not block on a slow
+// or COLD query-embedder. When the embed exceeds `ctx.embedTimeoutMs` the hybrid
+// search degrades to BM25-only (queryVec null) instead of hanging to the route
+// watchdog and 408ing (measured: search:fulltext 20ms vs hybrid 30s, all the
+// time in the single `await embedder(query)`). A real route-abort (ctx.signal)
+// still REJECTS and outranks the timeout. undefined/≤0 budget = unbounded (the
+// prior behavior — strictly opt-in per caller).
+describe('embed budget (embedTimeoutMs)', () => {
+  const neverEmbedder: Embedder = () => new Promise<number[]>(() => {}); // never settles
+
+  it('a query-embed that exceeds the budget degrades to BM25-only (embedderAvailable=false)', async () => {
+    const log = vi.fn();
+    const a = fakeSource('A', { bm25: [hit('A', '1', 3)], embedding: [hit('A', '9', 9)] });
+    const res = await runHybridSearch([a], {
+      ...baseCtx, mode: 'hybrid', embedder: neverEmbedder, embedTimeoutMs: 10, log,
+    });
+    expect(res.embedderAvailable).toBe(false);
+    expect(res.results.map((h) => h.source_id)).toEqual(['1']); // the BM25 hit, NOT the embed-only hit
+    expect(a.embedding).not.toHaveBeenCalled(); // no queryVec ⇒ vector leg never runs
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('exceeded 10ms budget'));
+  });
+
+  it('a query-embed within the budget runs the semantic leg normally', async () => {
+    const embedder: Embedder = async () => [0.1, 0.2, 0.3];
+    const a = fakeSource('A', { bm25: [hit('A', '1', 3)], embedding: [hit('A', '1', 9)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder, embedTimeoutMs: 500 });
+    expect(res.embedderAvailable).toBe(true);
+    expect(a.embedding).toHaveBeenCalled();
+  });
+
+  it('an undefined budget stays unbounded — the embed is awaited to completion', async () => {
+    const embedder: Embedder = async () => [0.1, 0.2, 0.3];
+    const a = fakeSource('A', { bm25: [hit('A', '1', 3)], embedding: [hit('A', '1', 9)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder }); // no embedTimeoutMs
+    expect(res.embedderAvailable).toBe(true);
+  });
+
+  it('a route-abort during the embed wait REJECTS and outranks the timeout budget', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)], embedding: [hit('A', '1', 1)] });
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 5);
+    await expect(
+      runHybridSearch([a], {
+        ...baseCtx, mode: 'hybrid', embedder: neverEmbedder, embedTimeoutMs: 10_000, signal: ctl.signal,
+      }),
+    ).rejects.toThrow();
+    clearTimeout(t);
+  });
+
+  it('EmbedTimeoutError carries the budget and is distinct from a plain embed failure', () => {
+    const e = new EmbedTimeoutError(4000);
+    expect(e).toBeInstanceOf(Error);
+    expect(e.name).toBe('EmbedTimeoutError');
+    expect(e.budgetMs).toBe(4000);
+    expect(e.message).toContain('4000ms');
+  });
+});
