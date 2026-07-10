@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import type { RankedItem } from '@papercusp/rrf';
-import { runFullTextSearch, runHybridSearch, type SearchContext } from './hybrid';
+import { EmbedTimeoutError, runFullTextSearch, runHybridSearch, type SearchContext } from './hybrid';
 import type { SearchSource, SearchHit, Listing, PgHandle, Embedder } from './types';
 
 // The doubles never call SQL — a structural placeholder is enough.

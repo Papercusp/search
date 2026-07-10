@@ -31,6 +31,20 @@ export interface SearchContext {
    *  never a silent partial result — and outranks the graceful skip-a-
    *  throwing-source degradation.  */
   signal?: AbortSignal;
+  /** Optional wall-clock budget (ms) for the QUERY-EMBED step only. When the
+   *  embedder takes longer, `runHybridSearch` degrades to BM25-only (queryVec
+   *  stays null) instead of blocking up to the route watchdog. undefined / ≤0
+   *  = unbounded (prior behavior; strictly opt-in per caller). Interactive
+   *  callers (e.g. the desktop transcript-search pill) pass a short budget so a
+   *  slow or COLD query-embedder — a local ONNX cold-start, or a degraded
+   *  OpenAI path under exhausted quota — can't turn a ~20ms BM25 search into a
+   *  30s 408 (2026-07-10: measured search:fulltext 20ms vs hybrid 30s, with all
+   *  the time in the single unbounded `await embedder(query)` below). The
+   *  orphaned embed still runs to completion in the background (warming the
+   *  embedder's memoized pipeline for the next query); only the WAIT is bounded
+   *  — the Embedder fn has no cancel seam. A route-abort via `signal` still
+   *  REJECTS and outranks this timeout. */
+  embedTimeoutMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -75,13 +89,69 @@ export interface HybridResult extends SearchResult {
   embedderAvailable: boolean;
 }
 
+/** Thrown internally when the query-embed exceeds `ctx.embedTimeoutMs`. Caught
+ *  by `runHybridSearch` → degrade to BM25-only. Exported so callers/tests can
+ *  distinguish a budget trip from a genuine embedder error. */
+export class EmbedTimeoutError extends Error {
+  constructor(readonly budgetMs: number) {
+    super(`query embed exceeded ${budgetMs}ms budget`);
+    this.name = 'EmbedTimeoutError';
+  }
+}
+
+/** Await `embedder(query)` but give up after `budgetMs` (→ EmbedTimeoutError)
+ *  or when `signal` aborts (→ the abort reason). With neither bound this is a
+ *  bare pass-through, byte-identical to `await embedder(query)`. The losing
+ *  embed promise is NOT cancelled — the `Embedder` fn has no signal seam — but
+ *  its eventual settle is swallowed so a slow embed that finishes after we've
+ *  degraded never surfaces as an unhandled rejection. */
+async function embedWithBudget(
+  embedder: Embedder,
+  query: string,
+  budgetMs: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<number[]> {
+  const p = embedder(query);
+  const bounded = budgetMs !== undefined && budgetMs > 0;
+  if (!bounded && !signal) return p;
+  return await new Promise<number[]>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      fn();
+    };
+    function onAbort(): void {
+      finish(() => reject(signal!.reason ?? new Error('aborted')));
+    }
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
+    if (bounded) {
+      timer = setTimeout(() => finish(() => reject(new EmbedTimeoutError(budgetMs!))), budgetMs);
+    }
+    // Swallow the orphaned settle after we've resolved/rejected (no cancel seam).
+    p.then(
+      (v) => finish(() => resolve(v)),
+      (e) => finish(() => reject(e)),
+    );
+  });
+}
+
 /**
  * Hybrid (BM25 + pgvector) search fused via RRF (search:semantic).
  *
  * `mode='hybrid'` runs both rankers; `mode='embeddings'` runs only the
- * vector ranker. If no embedder is supplied or it throws, `hybrid` falls
- * back to BM25-only and `embeddings` returns empty — mirroring the
- * original tool's silent degradation.
+ * vector ranker. If no embedder is supplied, it throws, or it exceeds
+ * `ctx.embedTimeoutMs`, `hybrid` falls back to BM25-only and `embeddings`
+ * returns empty — mirroring the original tool's silent degradation.
  */
 export async function runHybridSearch(
   sources: SearchSource[],
@@ -91,8 +161,11 @@ export async function runHybridSearch(
   ctx.signal?.throwIfAborted();
   if (ctx.embedder) {
     try {
-      queryVec = await ctx.embedder(ctx.query);
+      queryVec = await embedWithBudget(ctx.embedder, ctx.query, ctx.embedTimeoutMs, ctx.signal);
     } catch (err) {
+      // A route-abort outranks the timeout: rethrow so a cancelled search
+      // rejects. An EmbedTimeoutError or a genuine embedder failure is caught
+      // here → queryVec stays null → BM25-only degrade (embedderAvailable=false).
       if (ctx.signal?.aborted) throw err;
       ctx.log?.(`search:semantic query embed failed: ${(err as Error).message}`);
     }
