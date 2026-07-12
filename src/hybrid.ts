@@ -11,6 +11,7 @@
 
 import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
 import type { SearchSource, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
+import { applyRecencyRerank, type RecencyRank } from './recency';
 
 export interface SearchContext {
   sql: PgHandle;
@@ -45,6 +46,11 @@ export interface SearchContext {
    *  — the Embedder fn has no cancel seam. A route-abort via `signal` still
    *  REJECTS and outranks this timeout. */
   embedTimeoutMs?: number;
+  /** Optional recency re-rank applied to the fused candidate list BEFORE the
+   *  top-N cut (so a recent-but-lower-relevance candidate in the `limit*3`
+   *  over-fetch pool can be rescued). Absent ⇒ ranking is byte-identical to
+   *  pure relevance. See {@link RecencyRank}. */
+  recency?: RecencyRank;
   log?: (msg: string) => void;
 }
 
@@ -220,7 +226,9 @@ export async function runHybridSearch(
     }
   }
 
-  const fused = rrfCombine(inputs, RRF_K_DEFAULT);
+  const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);
+  // Optional recency re-rank over the FULL candidate pool, before the top-N cut.
+  const fused = ctx.recency ? applyRecencyRerank(fusedRaw, ctx.recency) : fusedRaw;
   const results = fused
     .slice(0, ctx.limit)
     .map(({ row, score, rankers }) => ({ ...row, score, rankers }));

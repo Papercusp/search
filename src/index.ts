@@ -29,4 +29,5 @@ export {
   type SearchResult,
   type HybridResult,
 } from './hybrid';
+export { applyRecencyRerank, toMillis, type RecencyRank } from './recency';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';

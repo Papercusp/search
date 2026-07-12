@@ -14,6 +14,10 @@ export interface SearchHit {
   source_id: string;
   /** Optional intra-workspace partition key the hit belongs to (host-defined). */
   scope?: string;
+  /** Optional timestamp for this hit (host-defined, engine-opaque — like `scope`).
+   *  ISO string / epoch-ms / Date. Populated by a source that wants recency
+   *  ranking; read by `RecencyRank.getTime` (which defaults to this field). */
+  ts?: string | number | Date | null;
   /** First ~200 chars of the matched body. */
   excerpt: string;
   /** ts_headline snippet with <mark> around matched terms. */
