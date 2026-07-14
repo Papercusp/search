@@ -10,7 +10,7 @@
  */
 
 import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
-import type { SearchSource, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
+import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
 import { applyRecencyRerank, type RecencyRank } from './recency';
 
 export interface SearchContext {
@@ -170,11 +170,58 @@ export async function runHybridSearch(
   sources: SearchSource[],
   ctx: SearchContext & { mode: 'embeddings' | 'hybrid'; embedder: Embedder | null },
 ): Promise<HybridResult> {
-  let queryVec: number[] | null = null;
   ctx.signal?.throwIfAborted();
-  if (ctx.embedder) {
+  // WI-4734: kick the query-embed off WITHOUT awaiting it — the BM25 legs don't
+  // need the vector, so they run CONCURRENTLY with the embed instead of behind
+  // it (the old serial shape put the whole embed latency on the critical path
+  // even though BM25 was independent). The vector legs await it below.
+  const embedP = ctx.embedder
+    ? embedWithBudget(ctx.embedder, ctx.query, ctx.embedTimeoutMs, ctx.signal)
+    : null;
+  // Pre-attach a no-op catch so an embed failure that settles while BM25 is
+  // still running never surfaces as an unhandled rejection (it is re-awaited —
+  // and properly handled — below).
+  embedP?.catch(() => {});
+
+  // Over-fetch per source so RRF has fusion headroom before the top-N cut.
+  const candidateLimit = ctx.limit * 3;
+  const inputs: Array<{ name: string; list: Listing }> = [];
+  const sourceParams = (source: SearchSource): SearchSourceParams => ({
+    sql: ctx.sql,
+    query: ctx.query,
+    workspaceId: ctx.workspaceId,
+    scopeFilter: ctx.scopeFilter,
+    limit: candidateLimit,
+    filters: ctx.filters,
+    signal: ctx.signal,
+    // Only defer for a source that can hydrate afterwards; others keep inline
+    // highlights so mixed-source calls stay correct.
+    ...(ctx.deferHighlight && source.hydrateHighlights ? { wantHighlight: false } : {}),
+  });
+
+  if (ctx.mode === 'hybrid') {
+    // All BM25 legs in parallel (independent queries; postgres-js pools).
+    // Promise.all preserves source order, so RRF input order — and therefore
+    // tie-breaking — is deterministic and identical to the old serial loop.
+    const bm25Lists = await Promise.all(
+      sources.map(async (source) => {
+        ctx.signal?.throwIfAborted();
+        try {
+          return await source.bm25(sourceParams(source));
+        } catch (err) {
+          if (ctx.signal?.aborted) throw err;
+          ctx.log?.(`bm25 ${source.name} skipped: ${(err as Error).message}`);
+          return null;
+        }
+      }),
+    );
+    for (const list of bm25Lists) if (list) inputs.push({ name: 'bm25', list });
+  }
+
+  let queryVec: number[] | null = null;
+  if (embedP) {
     try {
-      queryVec = await embedWithBudget(ctx.embedder, ctx.query, ctx.embedTimeoutMs, ctx.signal);
+      queryVec = await embedP;
     } catch (err) {
       // A route-abort outranks the timeout: rethrow so a cancelled search
       // rejects. An EmbedTimeoutError or a genuine embedder failure is caught
@@ -184,53 +231,22 @@ export async function runHybridSearch(
     }
   }
 
-  // Over-fetch per source so RRF has fusion headroom before the top-N cut.
-  const candidateLimit = ctx.limit * 3;
-  const inputs: Array<{ name: string; list: Listing }> = [];
-
-  if (ctx.mode === 'hybrid') {
-    for (const source of sources) {
-      ctx.signal?.throwIfAborted();
-      try {
-        const list = await source.bm25({
-          sql: ctx.sql,
-          query: ctx.query,
-          workspaceId: ctx.workspaceId,
-          scopeFilter: ctx.scopeFilter,
-          limit: candidateLimit,
-          filters: ctx.filters,
-          signal: ctx.signal,
-        });
-        inputs.push({ name: 'bm25', list });
-      } catch (err) {
-        if (ctx.signal?.aborted) throw err;
-        ctx.log?.(`bm25 ${source.name} skipped: ${(err as Error).message}`);
-      }
-    }
-  }
-
   if (queryVec) {
     const qVec = `[${queryVec.join(',')}]`;
-    for (const source of sources) {
-      if (!source.embedding) continue;
-      ctx.signal?.throwIfAborted();
-      try {
-        const list = await source.embedding({
-          sql: ctx.sql,
-          query: ctx.query,
-          workspaceId: ctx.workspaceId,
-          scopeFilter: ctx.scopeFilter,
-          limit: candidateLimit,
-          qVec,
-          filters: ctx.filters,
-          signal: ctx.signal,
-        });
-        inputs.push({ name: 'embeddings', list });
-      } catch (err) {
-        if (ctx.signal?.aborted) throw err;
-        ctx.log?.(`embed ${source.name} skipped: ${(err as Error).message}`);
-      }
-    }
+    const embedLists = await Promise.all(
+      sources.map(async (source) => {
+        if (!source.embedding) return null;
+        ctx.signal?.throwIfAborted();
+        try {
+          return await source.embedding({ ...sourceParams(source), qVec });
+        } catch (err) {
+          if (ctx.signal?.aborted) throw err;
+          ctx.log?.(`embed ${source.name} skipped: ${(err as Error).message}`);
+          return null;
+        }
+      }),
+    );
+    for (const list of embedLists) if (list) inputs.push({ name: 'embeddings', list });
   }
 
   const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);
@@ -239,5 +255,35 @@ export async function runHybridSearch(
   const results = fused
     .slice(0, ctx.limit)
     .map(({ row, score, rankers }) => ({ ...row, score, rankers }));
+
+  // WI-4734: hydrate highlights for the FINAL top-N only (per deferring source,
+  // one batched call). Best-effort — a hydration failure degrades that source's
+  // highlights to '' rather than failing a search that already has results.
+  if (ctx.deferHighlight) {
+    const bySource = new Map<string, SearchHit[]>();
+    for (const hit of results) {
+      const list = bySource.get(hit.source);
+      if (list) list.push(hit);
+      else bySource.set(hit.source, [hit]);
+    }
+    await Promise.all(
+      sources.map(async (source) => {
+        const hits = bySource.get(source.name);
+        if (!hits?.length || !source.hydrateHighlights) return;
+        ctx.signal?.throwIfAborted();
+        try {
+          const highlights = await source.hydrateHighlights(
+            sourceParams(source),
+            hits.map((h) => h.source_id),
+          );
+          for (const h of hits) h.highlight = highlights.get(h.source_id) ?? h.highlight;
+        } catch (err) {
+          if (ctx.signal?.aborted) throw err;
+          ctx.log?.(`highlight ${source.name} skipped: ${(err as Error).message}`);
+        }
+      }),
+    );
+  }
+
   return { results, totalHits: fused.length, embedderAvailable: !!queryVec };
 }
