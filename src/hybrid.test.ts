@@ -333,3 +333,124 @@ describe('embed budget (embedTimeoutMs)', () => {
     expect(e.message).toContain('4000ms');
   });
 });
+
+describe('WI-4734 — embed ∥ BM25 concurrency', () => {
+  it('runs the BM25 legs concurrently with the query embed (BM25 never waits behind it)', async () => {
+    // The embedder only resolves once bm25 has ALREADY run: under the old
+    // serial shape (await embed → then bm25) the embed would hit its 500ms
+    // budget and degrade to BM25-only. Under the parallel shape, bm25 runs
+    // inside the embed window, releases the gate, and the embedding leg
+    // completes — so embedderAvailable === true is the concurrency proof.
+    let releaseEmbed!: () => void;
+    const embedGate = new Promise<void>((r) => { releaseEmbed = r; });
+    const src: SearchSource = {
+      name: 'A',
+      bm25: vi.fn(async () => {
+        releaseEmbed();
+        return listing(hit('A', 'kw', 2));
+      }),
+      embedding: vi.fn(async () => listing(hit('A', 'vec', 1))),
+    };
+    const embedder: Embedder = vi.fn(async () => {
+      await embedGate;
+      return [0.1, 0.2];
+    });
+    const res = await runHybridSearch([src], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      embedTimeoutMs: 500,
+    });
+    expect(res.embedderAvailable).toBe(true);
+    expect(src.bm25).toHaveBeenCalledTimes(1);
+    expect(src.embedding).toHaveBeenCalledTimes(1);
+    const ids = res.results.map((h) => h.source_id);
+    expect(ids).toContain('kw');
+    expect(ids).toContain('vec');
+  });
+});
+
+describe('WI-4734 — deferred highlight hydration (deferHighlight)', () => {
+  /** A source that records the wantHighlight it was called with and supports
+   *  batched post-fusion hydration. */
+  function deferringSource(name: string, hits: SearchHit[]) {
+    const seen: Array<boolean | undefined> = [];
+    const hydrate = vi.fn(async (_p: unknown, ids: string[]) =>
+      new Map(ids.map((id) => [id, `HYDRATED-${id}`])),
+    );
+    const src: SearchSource = {
+      name,
+      bm25: vi.fn(async (p) => {
+        seen.push(p.wantHighlight);
+        return listing(...hits.map((h) => ({ ...h, highlight: '' })));
+      }),
+      hydrateHighlights: hydrate,
+    };
+    return { src, seen, hydrate };
+  }
+
+  it('passes wantHighlight:false to a hydrating source and hydrates ONLY the final top-N', async () => {
+    const { src, seen, hydrate } = deferringSource('A', [
+      hit('A', '1', 3), hit('A', '2', 2), hit('A', '3', 1),
+    ]);
+    const res = await runHybridSearch([src], {
+      ...baseCtx,
+      limit: 2,
+      mode: 'hybrid',
+      embedder: null,
+      deferHighlight: true,
+    });
+    expect(seen).toEqual([false]);
+    expect(hydrate).toHaveBeenCalledTimes(1);
+    const hydratedIds = hydrate.mock.calls[0][1] as string[];
+    expect(hydratedIds).toHaveLength(2); // final top-N only, never the 3-candidate pool
+    expect(res.results.map((h) => h.highlight)).toEqual(
+      res.results.map((h) => `HYDRATED-${h.source_id}`),
+    );
+  });
+
+  it('a source WITHOUT hydrateHighlights keeps inline highlights (wantHighlight never forced false)', async () => {
+    const seen: Array<boolean | undefined> = [];
+    const src: SearchSource = {
+      name: 'A',
+      bm25: vi.fn(async (p) => {
+        seen.push(p.wantHighlight);
+        return listing(hit('A', '1', 1));
+      }),
+    };
+    const res = await runHybridSearch([src], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder: null,
+      deferHighlight: true,
+    });
+    expect(seen).toEqual([undefined]);
+    expect(res.results[0].highlight).toBe('hl-1'); // the inline highlight survived
+  });
+
+  it('a hydration failure degrades that source to its existing highlights — the search still returns', async () => {
+    const src: SearchSource = {
+      name: 'A',
+      bm25: vi.fn(async () => listing({ ...hit('A', '1', 1), highlight: '' })),
+      hydrateHighlights: vi.fn(async () => { throw new Error('hydrate boom'); }),
+    };
+    const log = vi.fn();
+    const res = await runHybridSearch([src], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder: null,
+      deferHighlight: true,
+      log,
+    });
+    expect(res.results).toHaveLength(1);
+    expect(res.results[0].highlight).toBe('');
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('highlight A skipped'));
+  });
+
+  it('without deferHighlight the seam is inert — no wantHighlight, no hydration call', async () => {
+    const { src, seen, hydrate } = deferringSource('A', [hit('A', '1', 1)]);
+    await runHybridSearch([src], { ...baseCtx, mode: 'hybrid', embedder: null });
+    expect(seen).toEqual([undefined]);
+    expect(hydrate).not.toHaveBeenCalled();
+  });
+});
