@@ -51,6 +51,13 @@ export interface SearchContext {
    *  over-fetch pool can be rescued). Absent ⇒ ranking is byte-identical to
    *  pure relevance. See {@link RecencyRank}. */
   recency?: RecencyRank;
+  /** WI-4734: defer highlight computation to AFTER fusion, for the final top-N
+   *  only. Applies per source and only to sources that implement
+   *  `hydrateHighlights` (others keep inline highlights — safe mixed-source
+   *  behavior). With `limit*3` over-fetch across two rankers, inline
+   *  highlighting computes ~6× more highlight expressions than the caller
+   *  displays; deferral turns that into ONE batched hydration of `limit` rows. */
+  deferHighlight?: boolean;
   log?: (msg: string) => void;
 }
 

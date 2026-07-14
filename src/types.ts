@@ -71,6 +71,15 @@ export interface SearchSourceParams {
    *  already stops STARTING new source calls once it aborts, so ignoring
    *  this is safe (just less prompt). */
   signal?: AbortSignal;
+  /** WI-4734 highlight-deferral: when the engine passes `false`, the source MAY
+   *  skip its (expensive) highlight expression and return `highlight: ''` for
+   *  every row — the engine hydrates highlights AFTER fusion, for the final
+   *  top-N only, via {@link SearchSource.hydrateHighlights}. The engine only
+   *  passes `false` to a source that implements `hydrateHighlights`; absent /
+   *  `true` = inline highlights, byte-identical to the pre-seam behavior.
+   *  Rationale: with `limit*3` over-fetch across two rankers, inline
+   *  highlighting computes ~6× more `ts_headline`s than the caller displays. */
+  wantHighlight?: boolean;
 }
 
 /**
@@ -85,4 +94,12 @@ export interface SearchSource {
   bm25(p: SearchSourceParams): Promise<Listing>;
   /** Optional pgvector cosine-similarity ranked list (`<=>`) for this source. */
   embedding?(p: SearchSourceParams & { qVec: string }): Promise<Listing>;
+  /** WI-4734 highlight-deferral (opt-in): given the FINAL fused top-N hit ids
+   *  for this source, return `source_id → highlight` in ONE batched query.
+   *  Implementing this lets the engine pass `wantHighlight: false` to
+   *  `bm25`/`embedding` under `SearchContext.deferHighlight`, so the expensive
+   *  highlight expression runs for the displayed rows only. Best-effort: a
+   *  throw degrades to empty highlights for this source, never fails the
+   *  search. */
+  hydrateHighlights?(p: SearchSourceParams, sourceIds: string[]): Promise<Map<string, string>>;
 }
