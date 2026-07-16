@@ -37,6 +37,21 @@ export interface RecencyRank {
    * candidate set (RRF scores aren't on a fixed scale, so normalize before blend).
    */
   mode?: 'linear' | 'multiply';
+  /**
+   * Optional FRESH-CANDIDATE window (ms). The re-rank alone can only reorder
+   * candidates that survived the relevance-only over-fetch cut — on a large
+   * corpus, old high-term-density rows can monopolize the whole `limit*3`
+   * pool so no recent row is even ELIGIBLE for a recency boost (the
+   * agents-pill "no results from today" failure, WI-5097). When set (> 0)
+   * and `weight` > 0, `runHybridSearch` additionally fetches a BM25
+   * candidate list restricted to `filters.since = now - freshWindowMs` and
+   * feeds it to RRF as one more input — guaranteeing recent matches
+   * representation in the pool; the blended re-rank still owns the final
+   * ordering (an irrelevant-but-recent row won't leapfrog a good match).
+   * Sources that ignore `filters.since` return an identical list, which the
+   * engine detects and drops (no double-weighting). Absent/0 = off.
+   */
+  freshWindowMs?: number;
   /** Injectable clock (ms) for deterministic tests. Default `Date.now()`. */
   now?: number;
 }

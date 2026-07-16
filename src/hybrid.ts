@@ -158,6 +158,16 @@ async function embedWithBudget(
   });
 }
 
+/** True iff two listings rank the exact same keys in the exact same order —
+ *  the signature of a fresh-window leg whose source ignored `filters.since`
+ *  (or whose window spans the whole matching set). Used to drop the redundant
+ *  list so RRF never double-weights an unchanged ranking. */
+function sameListing(a: Listing, b: Listing): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i].key !== b[i].key) return false;
+  return true;
+}
+
 /**
  * Hybrid (BM25 + pgvector) search fused via RRF (search:semantic).
  *
@@ -199,23 +209,63 @@ export async function runHybridSearch(
     ...(ctx.deferHighlight && source.hydrateHighlights ? { wantHighlight: false } : {}),
   });
 
+  // Fresh-candidate window (RecencyRank.freshWindowMs): when the recency
+  // re-rank is active, ALSO fetch a BM25 candidate list restricted to the
+  // recent window, as one more RRF input. Without it, the re-rank can only
+  // reorder candidates that survived the relevance-only over-fetch cut — on a
+  // large corpus old high-term-density rows can fill the whole pool and starve
+  // every recent match out of eligibility (WI-5097: the agents-pill search
+  // returned nothing from the current day). Skipped when the caller's own
+  // `since` filter is already as narrow or narrower.
+  const recencyWeight = ctx.recency ? Math.max(0, Math.min(1, ctx.recency.weight ?? 0.3)) : 0;
+  const freshWindowMs = ctx.recency?.freshWindowMs ?? 0;
+  let freshSinceIso: string | null = null;
+  if (ctx.mode === 'hybrid' && recencyWeight > 0 && freshWindowMs > 0) {
+    const nowMs = ctx.recency?.now ?? Date.now();
+    const freshSinceMs = nowMs - freshWindowMs;
+    const callerSinceMs = ctx.filters?.since ? Date.parse(ctx.filters.since) : NaN;
+    if (!(Number.isFinite(callerSinceMs) && callerSinceMs >= freshSinceMs)) {
+      freshSinceIso = new Date(freshSinceMs).toISOString();
+    }
+  }
+
   if (ctx.mode === 'hybrid') {
     // All BM25 legs in parallel (independent queries; postgres-js pools).
     // Promise.all preserves source order, so RRF input order — and therefore
     // tie-breaking — is deterministic and identical to the old serial loop.
-    const bm25Lists = await Promise.all(
-      sources.map(async (source) => {
-        ctx.signal?.throwIfAborted();
-        try {
-          return await source.bm25(sourceParams(source));
-        } catch (err) {
-          if (ctx.signal?.aborted) throw err;
-          ctx.log?.(`bm25 ${source.name} skipped: ${(err as Error).message}`);
-          return null;
-        }
-      }),
-    );
-    for (const list of bm25Lists) if (list) inputs.push({ name: 'bm25', list });
+    // The fresh legs join the SAME fan-out (one concurrent stage, no extra
+    // latency step).
+    const runLeg = async (source: SearchSource, since: string | null): Promise<Listing | null> => {
+      ctx.signal?.throwIfAborted();
+      const label = since ? 'bm25-fresh' : 'bm25';
+      try {
+        const params = sourceParams(source);
+        return await source.bm25(
+          since ? { ...params, filters: { ...params.filters, since } } : params,
+        );
+      } catch (err) {
+        if (ctx.signal?.aborted) throw err;
+        ctx.log?.(`${label} ${source.name} skipped: ${(err as Error).message}`);
+        return null;
+      }
+    };
+    const [bm25Lists, freshLists] = await Promise.all([
+      Promise.all(sources.map((source) => runLeg(source, null))),
+      freshSinceIso
+        ? Promise.all(sources.map((source) => runLeg(source, freshSinceIso)))
+        : Promise.resolve(sources.map((): Listing | null => null)),
+    ]);
+    for (let i = 0; i < sources.length; i++) {
+      const list = bm25Lists[i];
+      if (list) inputs.push({ name: 'bm25', list });
+      const fresh = freshLists[i];
+      // Drop a fresh list identical to the main one (the source ignored
+      // `since`, or the window spans the whole matching set) — feeding the
+      // same ranking twice would double-weight those hits in RRF.
+      if (fresh && fresh.length > 0 && !(list && sameListing(list, fresh))) {
+        inputs.push({ name: 'bm25-fresh', list: fresh });
+      }
+    }
   }
 
   let queryVec: number[] | null = null;
