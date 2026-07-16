@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { RankedItem } from '@papercusp/rrf';
 import { EmbedTimeoutError, runFullTextSearch, runHybridSearch, type SearchContext } from './hybrid';
-import type { SearchSource, SearchHit, Listing, PgHandle, Embedder } from './types';
+import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Embedder } from './types';
 
 // The doubles never call SQL — a structural placeholder is enough.
 const sql = {} as PgHandle;
@@ -452,5 +452,113 @@ describe('WI-4734 — deferred highlight hydration (deferHighlight)', () => {
     await runHybridSearch([src], { ...baseCtx, mode: 'hybrid', embedder: null });
     expect(seen).toEqual([undefined]);
     expect(hydrate).not.toHaveBeenCalled();
+  });
+});
+
+// ── WI-5097 — the fresh-candidate leg (RecencyRank.freshWindowMs) ───────────
+// The recency re-rank alone can only reorder candidates that survived the
+// relevance-only over-fetch cut; on a large corpus, old high-term-density rows
+// can fill the whole pool and starve every recent match out of eligibility.
+// With freshWindowMs set, the engine adds a recent-window BM25 leg as one more
+// RRF input so recent matches are guaranteed pool representation.
+describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
+  const NOW = 1_800_000_000_000;
+  const H = 3_600_000;
+  const iso = (t: number) => new Date(t).toISOString();
+
+  /** A source whose bm25 honors filters.since over a timed corpus — rows are
+   *  score-desc, capped at p.limit, exactly like a real tsvector source. */
+  function timedSource(name: string, rows: Array<{ id: string; ts: number; score: number }>): SearchSource {
+    return {
+      name,
+      bm25: vi.fn(async (p: SearchSourceParams) => {
+        const since = p.filters?.since ? Date.parse(p.filters.since) : null;
+        return rows
+          .filter((r) => since == null || r.ts >= since)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, p.limit)
+          .map((r) => ranked({ ...hit(name, r.id, r.score), ts: iso(r.ts) }));
+      }),
+    };
+  }
+
+  // 6 old spammy rows (30d) outscore 1 recent row (1h) — with limit 2 the
+  // candidateLimit-6 main leg is 100% old rows; the recent one never makes it.
+  const corpus = [
+    ...Array.from({ length: 6 }, (_, i) => ({ id: `old-${i}`, ts: NOW - 30 * 24 * H, score: 10 - i })),
+    { id: 'recent', ts: NOW - 1 * H, score: 1 },
+  ];
+  const recency = { halfLifeMs: 24 * H, weight: 0.3, freshWindowMs: 48 * H, now: NOW };
+
+  it('rescues a recent match that the relevance-only pool cut would starve out', async () => {
+    const src = timedSource('A', corpus);
+
+    // CONTROL — no fresh window: the recent row is not even a candidate.
+    const control = await runHybridSearch([src], {
+      ...baseCtx, limit: 2, mode: 'hybrid', embedder: null,
+      recency: { ...recency, freshWindowMs: 0 },
+    });
+    expect(control.results.map((h) => h.source_id)).not.toContain('recent');
+
+    // WITH the fresh leg: the recent row enters via the since-window list and
+    // the blended re-rank puts it FIRST (decay ~0.97 vs ~0 for 30d-old rows).
+    const res = await runHybridSearch([src], {
+      ...baseCtx, limit: 2, mode: 'hybrid', embedder: null, recency,
+    });
+    expect(res.results[0].source_id).toBe('recent');
+    // The fresh leg queried the source with since = now - freshWindowMs.
+    expect(src.bm25).toHaveBeenLastCalledWith(
+      expect.objectContaining({ filters: expect.objectContaining({ since: iso(NOW - 48 * H) }) }),
+    );
+  });
+
+  it('drops a fresh list identical to the main one (source ignoring `since` is never double-weighted)', async () => {
+    const rows = [hit('A', '1', 3), hit('A', '2', 2)];
+    const ignoring = fakeSource('A', { bm25: rows }); // canned list — ignores filters entirely
+    const withFresh = await runHybridSearch([ignoring], { ...baseCtx, mode: 'hybrid', embedder: null, recency });
+    const without = await runHybridSearch([ignoring], {
+      ...baseCtx, mode: 'hybrid', embedder: null, recency: { ...recency, freshWindowMs: 0 },
+    });
+    // Same hits, same fused-then-blended scores — the redundant list added nothing.
+    expect(withFresh.results.map((h) => [h.source_id, h.score])).toEqual(
+      without.results.map((h) => [h.source_id, h.score]),
+    );
+  });
+
+  it('runs no fresh leg when recency is absent, weight is 0, or the window is 0', async () => {
+    for (const rec of [undefined, { ...recency, weight: 0 }, { ...recency, freshWindowMs: 0 }]) {
+      const src = timedSource('A', corpus);
+      await runHybridSearch([src], { ...baseCtx, mode: 'hybrid', embedder: null, recency: rec });
+      expect(src.bm25).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('skips the fresh leg when the caller`s own since filter is already as narrow or narrower', async () => {
+    const src = timedSource('A', corpus);
+    await runHybridSearch([src], {
+      ...baseCtx, mode: 'hybrid', embedder: null, recency,
+      filters: { since: iso(NOW - 24 * H) }, // narrower than the 48h window
+    });
+    expect(src.bm25).toHaveBeenCalledTimes(1);
+
+    // A WIDER caller window still gets the fresh leg (clamped to the window).
+    const src2 = timedSource('B', corpus);
+    await runHybridSearch([src2], {
+      ...baseCtx, mode: 'hybrid', embedder: null, recency,
+      filters: { since: iso(NOW - 30 * 24 * H) },
+    });
+    expect(src2.bm25).toHaveBeenCalledTimes(2);
+    expect(src2.bm25).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        filters: expect.objectContaining({ since: iso(NOW - 48 * H) }),
+      }),
+    );
+  });
+
+  it('never runs a fresh leg in embeddings-only mode (it is a BM25 construct)', async () => {
+    const src = timedSource('A', corpus);
+    const embedder: Embedder = async () => [0.1];
+    await runHybridSearch([src], { ...baseCtx, mode: 'embeddings', embedder, recency });
+    expect(src.bm25).not.toHaveBeenCalled();
   });
 });
