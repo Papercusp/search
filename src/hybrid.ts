@@ -164,7 +164,7 @@ async function embedWithBudget(
  *  list so RRF never double-weights an unchanged ranking. */
 function sameListing(a: Listing, b: Listing): boolean {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i].key !== b[i].key) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]?.key !== b[i]?.key) return false;
   return true;
 }
 
