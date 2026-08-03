@@ -560,11 +560,16 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
     // ...and 'shared' was NOT double-counted: it appears once, credited to the
     // main leg only, so its rankers carry no second lexical vote.
     expect(ids.filter((i) => i === 'shared')).toHaveLength(1);
-    const shared = res.results.find((h) => h.source_id === 'shared');
-    expect(shared?.rankers).toEqual(['bm25']);
+    // (the recency re-rank appends its own 'recency' tag to every timestamped
+    // hit — compare the LEXICAL legs only)
+    const lexical = (id: string): string[] =>
+      (res.results.find((h) => h.source_id === id)?.rankers ?? []).filter((r) =>
+        r.startsWith('bm25'),
+      );
+    expect(lexical('shared')).toEqual(['bm25']);
     // 'rescued' is the row the fresh leg genuinely added, so it IS attributed
     // to that leg — the dedupe drops overlap, never the rescue.
-    expect(res.results.find((h) => h.source_id === 'rescued')?.rankers).toEqual(['bm25-fresh']);
+    expect(lexical('rescued')).toEqual(['bm25-fresh']);
   });
 
   it('runs no fresh leg when recency is absent, weight is 0, or the window is 0', async () => {
