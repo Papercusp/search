@@ -26,15 +26,55 @@ export interface RecencyRank {
   getTime?: (hit: SearchHit) => number | string | Date | null | undefined;
   /** Decay half-life in ms: a hit this old keeps half its recency weight. */
   halfLifeMs: number;
-  /** How strongly recency competes with relevance, 0..1 (clamped). 0 = off
-   *  (pure relevance), 1 = recency co-equal / dominant. Default 0.3. */
+  /**
+   * How strongly recency competes with relevance, 0..1 (clamped). Default 0.3.
+   *
+   * In 'linear' mode this is a TRUE MIXING FRACTION: both terms span the full
+   * [0,1], so `weight` is the share of the final score recency controls. 0 =
+   * off (pure relevance), 0.5 = the two are exactly co-equal, 1 = ordering is
+   * pure recency. See the normalisation note on `mode` for why that guarantee
+   * needs enforcing rather than just documenting.
+   */
   weight?: number;
   /**
    * Blend mode (default 'linear'):
    *  - 'linear'   final = (1-weight)·normRelevance + weight·decay
    *  - 'multiply' final = normRelevance · decay^weight   (recency SCALES relevance)
-   * `normRelevance` is the fused RRF score normalized to [0,1] within the
-   * candidate set (RRF scores aren't on a fixed scale, so normalize before blend).
+   *
+   * ─── HOW normRelevance IS DERIVED, AND WHY IT DIFFERS PER MODE ────────────
+   *
+   * 'linear' RANK-normalises: normRelevance = 1 - rank/(n-1), where `rank` is
+   * the number of candidates scoring strictly higher (so ties share a value).
+   * Best candidate → 1, worst → 0, spanning exactly the same [0,1] the decay
+   * term spans. That equality of RANGE is what makes `weight` mean what it
+   * says.
+   *
+   * It used to divide by the maximum instead, and that silently broke the
+   * contract in a way no amount of documentation could fix, because RRF scores
+   * are COMPRESSED and their compression depends on the pool. With k=60 a
+   * single-ranker pool of n runs from 1/61 down to 1/(60+n), so max-division
+   * left normRelevance spanning only [0.813, 1] at n=15, [0.581, 1] at n=45,
+   * [0.407, 1] at n=90 — while decay always spanned the full [0,1]. Recency
+   * therefore reached parity with relevance at weight 0.157 / 0.295 / 0.372
+   * respectively, and at 0.415 once one candidate was found by both rankers
+   * (the higher max pushes every other candidate's floor down). So the
+   * documented default of 0.3 — presented as a modest tilt — was at or past
+   * co-equal for a typical pool, AND the crossover point moved with pool size
+   * and composition. `weight` had no stable meaning across two queries.
+   *
+   * Rank-normalising is also the honest reading of the input. RRF deliberately
+   * discards score magnitude and keeps only rank; treating its output as an
+   * interval quantity re-introduces exactly the arbitrariness RRF removed, and
+   * inherits an outlier sensitivity at both ends. Rank has neither problem, and
+   * it yields a property you can actually state and test: at weight w over n
+   * candidates, the recency term can move a hit at most w·(n-1)/(1-w) rank
+   * positions. Nothing about that depends on the corpus.
+   *
+   * 'multiply' keeps MAX-division (normRelevance = score/max, a ratio in
+   * (0,1]) — deliberately, not by omission. It is a product, so the two terms
+   * need comparable SHAPE, not comparable range, and rank-normalising there
+   * would send the worst candidate's relevance factor to exactly 0, collapsing
+   * its score to 0 regardless of how recent it is.
    */
   mode?: 'linear' | 'multiply';
   /**
@@ -93,11 +133,39 @@ export function applyRecencyRerank(
   let maxScore = 0;
   for (const it of fused) if (it.score > maxScore) maxScore = it.score;
 
+  // Rank-normalisation support for 'linear' (see the note on RecencyRank.mode).
+  // `descScores` is sorted best-first; the binary search below returns the
+  // COUNT of strictly-higher scores, which is the competition rank — so equal
+  // scores get equal relevance and an arbitrary tiebreak never becomes a real
+  // score difference.
+  const descScores = fused.map((it) => it.score).sort((a, b) => b - a);
+  const n = descScores.length;
+  const strictlyGreaterCount = (score: number): number => {
+    let lo = 0;
+    let hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (descScores[mid]! > score) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
   const scored = fused.map((it, idx) => {
     const t = toMillis(getTime(it.row));
     const hasTime = t != null;
     const decay = hasTime && halfLife > 0 ? Math.pow(0.5, Math.max(0, now - t) / halfLife) : 0;
-    const normRel = maxScore > 0 ? it.score / maxScore : 0;
+    // 'multiply' wants a ratio; 'linear' wants a full-[0,1] range it can be
+    // mixed against. A single candidate (or an all-tied pool) is maximally
+    // relevant by definition — normRel 1, so ordering falls to decay alone.
+    const normRel =
+      mode === 'multiply'
+        ? maxScore > 0
+          ? it.score / maxScore
+          : 0
+        : n > 1
+          ? 1 - strictlyGreaterCount(it.score) / (n - 1)
+          : 1;
     const blended = mode === 'multiply'
       ? normRel * Math.pow(decay, weight) // weight 0 → ×1 (pure relevance); 1 → ×decay
       : (1 - weight) * normRel + weight * decay;

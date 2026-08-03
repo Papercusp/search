@@ -182,16 +182,6 @@ async function embedWithBudget(
   });
 }
 
-/** True iff two listings rank the exact same keys in the exact same order —
- *  the signature of a fresh-window leg whose source ignored `filters.since`
- *  (or whose window spans the whole matching set). Used to drop the redundant
- *  list so RRF never double-weights an unchanged ranking. */
-function sameListing(a: Listing, b: Listing): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i]?.key !== b[i]?.key) return false;
-  return true;
-}
-
 /**
  * Hybrid (BM25 + pgvector) search fused via RRF (search:semantic).
  *
@@ -320,12 +310,18 @@ export async function runHybridSearch(
       if (list) recordInput('bm25', list);
       const rawFresh = freshLists[i];
       const fresh = rawFresh ? floorList(rawFresh, 'bm25-fresh', sourceName) : null;
-      // Drop a fresh list identical to the main one (the source ignored
-      // `since`, or the window spans the whole matching set) — feeding the
-      // same ranking twice would double-weight those hits in RRF.
-      if (fresh && fresh.length > 0 && !(list && sameListing(list, fresh))) {
-        recordInput('bm25-fresh', fresh);
-      }
+      // P-003: the fresh leg exists to guarantee recent rows a SEAT in the
+      // candidate pool (WI-5097) — not to give them a second relevance vote.
+      // rrfCombine SUMS contributions per key, so a row appearing in both legs
+      // used to collect 1/(k+mainRank) + 1/(k+freshRank), i.e. recency counted
+      // once here as inflated relevance and again in the recency blend. Only
+      // rows the relevance-only cut actually MISSED need adding, so dedupe
+      // against the main list. This also subsumes the old identical-list guard:
+      // a source that ignores `since` returns the same rows, every one of which
+      // is filtered out here, leaving nothing to push.
+      const alreadyPooled = new Set((list ?? []).map((entry) => entry.key));
+      const freshOnly = fresh ? fresh.filter((entry) => !alreadyPooled.has(entry.key)) : null;
+      if (freshOnly && freshOnly.length > 0) recordInput('bm25-fresh', freshOnly);
     }
   }
 
