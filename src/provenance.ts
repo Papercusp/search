@@ -9,13 +9,26 @@
  * names, in a different place, over a network boundary. This module is the
  * one place that knows them.
  *
- * WHY IT MATTERS, concretely: a vector-only hit has no matched TERMS, so
- * `ts_headline` has nothing to wrap in <mark> and returns the head of the
- * document unmarked. A card that renders that string looks like it is showing
- * you the match — it is showing you the first 200 characters of a turn, which
- * is exactly as informative as showing a random 200. The reader cannot tell a
- * strong semantic hit from a bug. Naming the provenance is what makes the
- * excerpt honest.
+ * WHY IT MATTERS, concretely: a card renders `highlight || excerpt`, and
+ * nothing in that string says which LEG retrieved the row. A vector-only hit
+ * is a row the lexical ranker did not return at all — it was retrieved on
+ * meaning — so the terms a reader sees (or does not see) in the excerpt are
+ * not the reason it is on screen. Without provenance the reader cannot tell a
+ * strong semantic hit from a broken search.
+ *
+ * ⚠ MEASURED, and it corrects the obvious intuition (2026-08-03, live corpus,
+ * query "why did the gate go red", 30 hits): a vector-only hit does NOT
+ * generally come back unmarked. 9 of 10 `semantic` hits had <mark> in their
+ * highlight, and 2 of 20 `lexical` hits had none. `ts_headline` runs over the
+ * DOCUMENT against the tsquery at hydration time, independently of which
+ * ranker returned the row — so a turn the BM25 leg ranked too low to return
+ * can still contain query terms and get them marked, and a lexical hit can
+ * come back unmarked when the headline window lands away from them.
+ *
+ * So "vector-only" and "no highlight" are DIFFERENT conditions and must not be
+ * inferred from one another: this module answers WHICH LEG RETRIEVED IT, and
+ * a caller that wants "is the text on screen actually the match" has to test
+ * the rendered string for <mark> separately.
  *
  * Deliberately tolerant of ranker RENAMES: the lexical leg is registered as
  * `bm25` today (plus `bm25-fresh`, the recency-window candidate leg) and
