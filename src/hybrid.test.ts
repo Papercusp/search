@@ -562,3 +562,185 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
     expect(src.bm25).not.toHaveBeenCalled();
   });
 });
+
+describe('P-001 — per-ranker minScore floors (applied BEFORE fusion)', () => {
+  const embedder: Embedder = async () => [0.1, 0.2, 0.3];
+
+  it('no floors ⇒ byte-identical ranking to the pre-floor engine', async () => {
+    const src = (): SearchSource =>
+      fakeSource('A', {
+        bm25: [hit('A', '1', 0.9), hit('A', '2', 0.01)],
+        embedding: [hit('A', '3', 0.8), hit('A', '4', 0.02)],
+      });
+    const before = await runHybridSearch([src()], { ...baseCtx, mode: 'hybrid', embedder });
+    const after = await runHybridSearch([src()], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: {},
+    });
+    expect(after.results.map((h) => h.source_id)).toEqual(before.results.map((h) => h.source_id));
+    expect(after.totalHits).toBe(before.totalHits);
+  });
+
+  it('drops sub-floor candidates from the VECTOR leg before fusion', async () => {
+    const a = fakeSource('A', {
+      bm25: [hit('A', 'lex', 0.5)],
+      // Rank 1 in its own list, but a similarity nobody would call a match.
+      embedding: [hit('A', 'noise', 0.03), hit('A', 'real', 0.72)],
+    });
+    const res = await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: { embeddings: 0.35 },
+    });
+    const ids = res.results.map((h) => h.source_id);
+    expect(ids).toContain('real');
+    expect(ids).not.toContain('noise');
+  });
+
+  it('is what stops rank-1 noise outranking a real hit — the defect RRF cannot see', async () => {
+    // 'noise' is rank 1 of the vector leg, so RRF hands it the SAME 1/(k+1)
+    // contribution as a rank-1 hit from any other ranker. Only a pre-fusion
+    // floor can tell the difference, because fusion discards the native score.
+    const src = (): SearchSource =>
+      fakeSource('A', {
+        bm25: [hit('A', 'lex', 0.4)],
+        embedding: [hit('A', 'noise', 0.02)],
+      });
+    const unfloored = await runHybridSearch([src()], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(unfloored.results.map((h) => h.source_id)).toContain('noise');
+    expect(unfloored.results[0]?.score).toBeCloseTo(unfloored.results[1]?.score ?? -1);
+
+    const floored = await runHybridSearch([src()], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: { embeddings: 0.3 },
+    });
+    expect(floored.results.map((h) => h.source_id)).toEqual(['lex']);
+  });
+
+  it('floors each ranker in its OWN units — one number cannot serve both scales', async () => {
+    // A lexical ts_rank_cd of 0.08 is a perfectly ordinary hit; a cosine of
+    // 0.08 is noise. A single global floor either keeps both or kills both.
+    const a = fakeSource('A', {
+      bm25: [hit('A', 'lex', 0.08)],
+      embedding: [hit('A', 'vec', 0.08)],
+    });
+    const res = await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: { bm25: 0.02, embeddings: 0.35 },
+    });
+    expect(res.results.map((h) => h.source_id)).toEqual(['lex']);
+  });
+
+  it('a floor that empties a ranker leaves the other ranker intact, not an empty search', async () => {
+    const a = fakeSource('A', {
+      bm25: [hit('A', '1', 0.6), hit('A', '2', 0.5)],
+      embedding: [hit('A', '9', 0.05)],
+    });
+    const res = await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: { embeddings: 0.5 },
+    });
+    expect(res.results.map((h) => h.source_id)).toEqual(['1', '2']);
+    expect(res.embedderAvailable).toBe(true); // the embedder worked; its hits were rejected
+  });
+
+  it('logs what a floor cut, per ranker + source', async () => {
+    const log = vi.fn();
+    const a = fakeSource('A', { bm25: [hit('A', '1', 0.6)], embedding: [hit('A', '9', 0.05)] });
+    await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: { embeddings: 0.5 },
+      log,
+    });
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('embeddings A minScore 0.5 dropped 1/1'),
+    );
+  });
+
+  it('applies the bm25 family floor to the fresh leg too', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 0.01)] });
+    const log = vi.fn();
+    await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder: null,
+      log,
+      recency: { weight: 0.3, halfLifeMs: 24 * 3600_000, freshWindowMs: 48 * 3600_000 },
+      minScore: { bm25: 0.1 },
+    });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('bm25-fresh A minScore 0.1'));
+  });
+
+  it('runFullTextSearch honours the bm25 floor as well', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 0.6), hit('A', '2', 0.004)] });
+    const res = await runFullTextSearch([a], { ...baseCtx, minScore: { bm25: 0.01 } });
+    expect(res.results.map((h) => h.source_id)).toEqual(['1']);
+    expect(res.totalHits).toBe(1); // the floored-out row is not a "hit" at all
+  });
+});
+
+describe('P-001 — rankerScores provenance (pre-fusion native scores)', () => {
+  const embedder: Embedder = async () => [0.1, 0.2, 0.3];
+
+  it('carries each ranker`s NATIVE score, keyed by ranker', async () => {
+    const a = fakeSource('A', {
+      bm25: [hit('A', '1', 0.0731)],
+      embedding: [hit('A', '1', 0.6142)],
+    });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(res.results[0]?.rankerScores).toEqual({ bm25: 0.0731, embeddings: 0.6142 });
+    // ...and `score` is the RRF value, which is why the provenance is needed.
+    expect(res.results[0]?.score).not.toBe(0.6142);
+  });
+
+  it('reports ONLY the rankers that actually returned the hit', async () => {
+    const a = fakeSource('A', {
+      bm25: [hit('A', 'lex-only', 0.5)],
+      embedding: [hit('A', 'vec-only', 0.8)],
+    });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder });
+    const byId = Object.fromEntries(res.results.map((h) => [h.source_id, h.rankerScores]));
+    expect(byId['lex-only']).toEqual({ bm25: 0.5 });
+    expect(byId['vec-only']).toEqual({ embeddings: 0.8 });
+  });
+
+  it('reports the score that SURVIVED the floor, never a dropped one', async () => {
+    const a = fakeSource('A', {
+      bm25: [hit('A', '1', 0.5)],
+      embedding: [hit('A', '1', 0.04)],
+    });
+    const res = await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder,
+      minScore: { embeddings: 0.35 },
+    });
+    expect(res.results[0]?.rankerScores).toEqual({ bm25: 0.5 });
+    expect(res.results[0]?.rankers).toEqual(['bm25']);
+  });
+
+  it('does not alias engine state — mutating a hit`s rankerScores cannot corrupt another', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 0.5)], embedding: [hit('A', '1', 0.9)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder });
+    res.results[0]!.rankerScores!.bm25 = -999;
+    const again = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(again.results[0]?.rankerScores?.bm25).toBe(0.5);
+  });
+
+  it('runFullTextSearch carries the same shape (bm25 native score)', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 0.42)] });
+    const res = await runFullTextSearch([a], baseCtx);
+    expect(res.results[0]?.rankerScores).toEqual({ bm25: 0.42 });
+  });
+});

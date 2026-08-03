@@ -12,6 +12,7 @@
 import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
 import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
 import { applyRecencyRerank, type RecencyRank } from './recency';
+import { applyMinScore, type MinScoreFloors } from './min-score';
 
 export interface SearchContext {
   sql: PgHandle;
@@ -58,6 +59,18 @@ export interface SearchContext {
    *  highlighting computes ~6× more highlight expressions than the caller
    *  displays; deferral turns that into ONE batched hydration of `limit` rows. */
   deferHighlight?: boolean;
+  /**
+   * Optional PER-RANKER minimum-score floors, applied to each ranker's list
+   * BEFORE fusion (see {@link MinScoreFloors}). Absent ⇒ no filtering, and
+   * ranking is byte-identical to the pre-floor engine.
+   *
+   * This is the only stage at which a weak match can be rejected: RRF fuses
+   * by rank position and discards the native score, so after fusion a rank-1
+   * noise hit is indistinguishable from a rank-1 excellent one. Floors are
+   * per-ranker because `ts_rank_cd` and cosine similarity are different
+   * scales — one global number cannot floor both.
+   */
+  minScore?: MinScoreFloors;
   log?: (msg: string) => void;
 }
 
@@ -84,7 +97,18 @@ export async function runFullTextSearch(
         filters: ctx.filters,
         signal: ctx.signal,
       });
-      for (const item of listing) hits.push(item.row);
+      // Floor before collecting: fulltext has no fusion stage, but the floor
+      // means the same thing here — reject what the ranker itself scored as
+      // noise, in the ranker's own units.
+      const { list, dropped, floor } = applyMinScore(listing, 'bm25', ctx.minScore);
+      if (dropped > 0) {
+        ctx.log?.(
+          `search:fulltext ${source.name} bm25 minScore ${floor} dropped ${dropped}/${listing.length}`,
+        );
+      }
+      // Carry the native score as provenance too, so a caller renders the same
+      // shape whether it came through fulltext or hybrid.
+      for (const item of list) hits.push({ ...item.row, rankerScores: { bm25: item.row.score } });
     } catch (err) {
       // Abort outranks graceful degradation: a cancelled search must reject,
       // not be "skipped" into a quiet partial result.
@@ -196,6 +220,38 @@ export async function runHybridSearch(
   // Over-fetch per source so RRF has fusion headroom before the top-N cut.
   const candidateLimit = ctx.limit * 3;
   const inputs: Array<{ name: string; list: Listing }> = [];
+
+  // Pre-fusion provenance. RRF's output score is an RRF value, not a native
+  // one, and the native score is gone the moment fusion runs — so capture it
+  // here, per ranker, keyed by the fusion key. `keyOfRow` lets the final hits
+  // find their own entry without re-deriving rrfCombine's first-occurrence
+  // rule: it keeps the row OBJECT that fusion carries through.
+  const nativeByKey = new Map<string, Record<string, number>>();
+  const keyOfRow = new Map<SearchHit, string>();
+  /** Apply `ranker`'s floor (if any) to a source's list, logging what it cut. */
+  const floorList = (list: Listing, ranker: string, sourceName: string): Listing => {
+    const { list: kept, dropped, floor } = applyMinScore(list, ranker, ctx.minScore);
+    if (dropped > 0) {
+      ctx.log?.(
+        `${ranker} ${sourceName} minScore ${floor} dropped ${dropped}/${list.length}`,
+      );
+    }
+    return kept;
+  };
+  /** Record a floored list's native scores, then enqueue it as an RRF input. */
+  const recordInput = (ranker: string, list: Listing): void => {
+    for (const entry of list) {
+      keyOfRow.set(entry.row, entry.key);
+      const existing = nativeByKey.get(entry.key);
+      if (existing) {
+        // First occurrence wins, mirroring rrfCombine's row-payload rule.
+        if (!(ranker in existing)) existing[ranker] = entry.score;
+      } else {
+        nativeByKey.set(entry.key, { [ranker]: entry.score });
+      }
+    }
+    inputs.push({ name: ranker, list });
+  };
   const sourceParams = (source: SearchSource): SearchSourceParams => ({
     sql: ctx.sql,
     query: ctx.query,
@@ -256,14 +312,19 @@ export async function runHybridSearch(
         : Promise.resolve(sources.map((): Listing | null => null)),
     ]);
     for (let i = 0; i < sources.length; i++) {
-      const list = bm25Lists[i];
-      if (list) inputs.push({ name: 'bm25', list });
-      const fresh = freshLists[i];
+      const sourceName = sources[i]!.name;
+      const raw = bm25Lists[i];
+      // Floor BOTH legs before the identity check below, so the "same ranking
+      // twice" verdict is made on the lists fusion will actually see.
+      const list = raw ? floorList(raw, 'bm25', sourceName) : null;
+      if (list) recordInput('bm25', list);
+      const rawFresh = freshLists[i];
+      const fresh = rawFresh ? floorList(rawFresh, 'bm25-fresh', sourceName) : null;
       // Drop a fresh list identical to the main one (the source ignored
       // `since`, or the window spans the whole matching set) — feeding the
       // same ranking twice would double-weight those hits in RRF.
       if (fresh && fresh.length > 0 && !(list && sameListing(list, fresh))) {
-        inputs.push({ name: 'bm25-fresh', list: fresh });
+        recordInput('bm25-fresh', fresh);
       }
     }
   }
@@ -296,15 +357,26 @@ export async function runHybridSearch(
         }
       }),
     );
-    for (const list of embedLists) if (list) inputs.push({ name: 'embeddings', list });
+    for (let i = 0; i < sources.length; i++) {
+      const list = embedLists[i];
+      if (!list) continue;
+      // The floor matters most here: on a sparsely-embedded corpus the vector
+      // leg returns its k nearest rows whether or not any of them is a match,
+      // and fusion would hand rank-1 noise the same weight as a real hit.
+      recordInput('embeddings', floorList(list, 'embeddings', sources[i]!.name));
+    }
   }
 
   const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);
   // Optional recency re-rank over the FULL candidate pool, before the top-N cut.
   const fused = ctx.recency ? applyRecencyRerank(fusedRaw, ctx.recency) : fusedRaw;
-  const results = fused
-    .slice(0, ctx.limit)
-    .map(({ row, score, rankers }) => ({ ...row, score, rankers }));
+  const results = fused.slice(0, ctx.limit).map(({ row, score, rankers }) => {
+    const key = keyOfRow.get(row);
+    const native = key === undefined ? undefined : nativeByKey.get(key);
+    // Copy: `nativeByKey` keeps accumulating per-key state and callers mutate
+    // hits (highlight hydration below), so the hit must not alias it.
+    return { ...row, score, rankers, ...(native ? { rankerScores: { ...native } } : {}) };
+  });
 
   // WI-4734: hydrate highlights for the FINAL top-N only (per deferring source,
   // one batched call). Best-effort — a hydration failure degrades that source's

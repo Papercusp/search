@@ -30,4 +30,10 @@ export {
   type HybridResult,
 } from './hybrid';
 export { applyRecencyRerank, toMillis, type RecencyRank } from './recency';
+export {
+  applyMinScore,
+  resolveMinScore,
+  type MinScoreFloors,
+  type MinScoreOutcome,
+} from './min-score';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';

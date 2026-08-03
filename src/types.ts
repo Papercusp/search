@@ -26,6 +26,19 @@ export interface SearchHit {
   score: number;
   /** Which rankers contributed this hit. */
   rankers: string[];
+  /**
+   * PRE-FUSION per-ranker native scores, keyed by ranker name — e.g.
+   * `{ bm25: 0.0731, embeddings: 0.6142 }`. Populated by the engine so a
+   * caller can render match PROVENANCE ("semantic match, cosine 0.61")
+   * instead of guessing from `score`, which after fusion is an RRF value
+   * (≈0.016 per rank-1 contribution) in nobody's units and comparable only
+   * against other hits from the same search.
+   *
+   * Absent for a hit the engine did not fuse (a host constructing hits
+   * directly), and for rankers that did not return this hit. Read it, never
+   * assume a key is present.
+   */
+  rankerScores?: Record<string, number>;
 }
 
 /** A single source's ranked list, keyed for RRF fusion. */
