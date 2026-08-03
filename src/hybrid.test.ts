@@ -525,6 +525,48 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
     );
   });
 
+  it('P-003: a PARTIALLY-overlapping fresh list adds only the rows the relevance cut missed', async () => {
+    // The fresh leg guarantees recent rows a SEAT (WI-5097); it must not also
+    // hand a second RRF vote to rows the main leg already returned. rrfCombine
+    // SUMS per key, so before the dedupe an overlapping row collected
+    // 1/(k+mainRank) + 1/(k+freshRank) — recency inflating relevance, then
+    // counted AGAIN by the recency blend.
+    const NOW2 = Date.parse('2026-07-12T12:00:00Z');
+    const isoAt = (ms: number): string => new Date(ms).toISOString();
+    const H2 = 3_600_000;
+    // 'shared' is in both legs; 'buried' is old and main-only; 'rescued' is
+    // recent and ONLY reachable via the fresh leg.
+    const src: SearchSource = {
+      name: 'A',
+      bm25: vi.fn(async (p: SearchSourceParams) =>
+        p.filters?.since
+          ? listing(
+              { ...hit('A', 'shared', 5), ts: isoAt(NOW2 - 2 * H2) },
+              { ...hit('A', 'rescued', 4), ts: isoAt(NOW2 - 1 * H2) },
+            )
+          : listing(
+              { ...hit('A', 'shared', 5), ts: isoAt(NOW2 - 2 * H2) },
+              { ...hit('A', 'buried', 4), ts: isoAt(NOW2 - 400 * H2) },
+            ),
+      ),
+    };
+    const recency2 = { weight: 0.3, halfLifeMs: 24 * H2, freshWindowMs: 48 * H2, now: NOW2 };
+    const res = await runHybridSearch([src], {
+      ...baseCtx, mode: 'hybrid', embedder: null, recency: recency2,
+    });
+    const ids = res.results.map((h) => h.source_id);
+    // The rescue still happens — that is WI-5097's guarantee, untouched.
+    expect(ids).toContain('rescued');
+    // ...and 'shared' was NOT double-counted: it appears once, credited to the
+    // main leg only, so its rankers carry no second lexical vote.
+    expect(ids.filter((i) => i === 'shared')).toHaveLength(1);
+    const shared = res.results.find((h) => h.source_id === 'shared');
+    expect(shared?.rankers).toEqual(['bm25']);
+    // 'rescued' is the row the fresh leg genuinely added, so it IS attributed
+    // to that leg — the dedupe drops overlap, never the rescue.
+    expect(res.results.find((h) => h.source_id === 'rescued')?.rankers).toEqual(['bm25-fresh']);
+  });
+
   it('runs no fresh leg when recency is absent, weight is 0, or the window is 0', async () => {
     for (const rec of [undefined, { ...recency, weight: 0 }, { ...recency, freshWindowMs: 0 }]) {
       const src = timedSource('A', corpus);
