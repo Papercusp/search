@@ -791,3 +791,122 @@ describe('P-001 — rankerScores provenance (pre-fusion native scores)', () => {
     expect(res.results[0]?.rankerScores).toEqual({ bm25: 0.42 });
   });
 });
+
+// ── P-020: the per-leg execution report is WIRED, not just typed ────────────
+// Regression guard for EI-19466920786445299. `legs` was added to SearchResult
+// and wired into runFullTextSearch, but runHybridSearch never fed the
+// execution counters — only `candidates`/`floored` at the floor+fusion choke
+// points. Those two cannot observe execution, so `status` derived to 'not-run'
+// for BOTH legs on every hybrid search: internally contradictory (candidates
+// flowed from legs that "never ran") and it silently disabled the whole
+// degradation detector on the exact path the measured case occurs on.
+//
+// Every assertion below fails against that shape, which is the point — the
+// tsc error it also produced was only the visible half of the defect.
+describe('P-020 leg reporting (hybrid)', () => {
+  const embedder: Embedder = async () => [0.1, 0.2, 0.3];
+
+  it('reports BOTH legs as ran on a healthy hybrid search', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)], embedding: [hit('A', '2', 1)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder });
+    // The bug reported 'not-run'/'not-run' here while returning results.
+    expect(res.legs.lexical.status).toBe('ran');
+    expect(res.legs.semantic.status).toBe('ran');
+    expect(res.legs).toMatchObject({ degraded: false, warning: null });
+  });
+
+  it('counts calls and candidates per leg', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1), hit('A', '2', 1)] });
+    const b = fakeSource('B', { bm25: [hit('B', '1', 1)] });
+    const res = await runHybridSearch([a, b], { ...baseCtx, mode: 'hybrid', embedder: null });
+    expect(res.legs.lexical.callsRun).toBe(2);
+    expect(res.legs.lexical.candidates).toBe(3);
+  });
+
+  it('a source whose bm25 throws is counted as a failed call, named', async () => {
+    const bad = fakeSource('bad', { throwBm25: true });
+    const good = fakeSource('good', { bm25: [hit('good', '1', 1)] });
+    const res = await runHybridSearch([bad, good], { ...baseCtx, mode: 'hybrid', embedder: null });
+    expect(res.legs.lexical).toMatchObject({ status: 'ran', callsRun: 1, callsFailed: 1 });
+    expect(res.legs.lexical.failures).toEqual([
+      { source: 'bad', ranker: 'bm25', error: expect.stringContaining('boom') },
+    ]);
+    expect(res.legs.degraded).toBe(true);
+  });
+
+  it('a dead embedder reports the semantic leg BLOCKED, not merely absent', async () => {
+    // The distinction that matters: 'not-run' means "never wanted". An
+    // embedder that was configured and died is a degradation, and reading it
+    // as not-run would make a broken embedder look like a lexical-only search.
+    const throwingEmbedder: Embedder = async () => {
+      throw new Error('embedder down');
+    };
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)] });
+    const res = await runHybridSearch([a], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder: throwingEmbedder,
+    });
+    expect(res.legs.semantic.status).toBe('errored');
+    expect(res.legs.semantic.blocked).toContain('query embed failed');
+    expect(res.legs.degraded).toBe(true);
+    expect(res.legs.warning).toContain('semantic leg blocked');
+  });
+
+  it('an embed budget trip is reported as blocked too', async () => {
+    const slowEmbedder: Embedder = async () => {
+      throw new EmbedTimeoutError(50);
+    };
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder: slowEmbedder });
+    expect(res.legs.semantic.blocked).toContain('query embed failed');
+  });
+
+  it('no embedder configured leaves the semantic leg not-run (config, not degradation)', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder: null });
+    expect(res.legs.semantic).toMatchObject({ status: 'not-run', blocked: null });
+    expect(res.legs.degraded).toBe(false);
+  });
+
+  it('no source implementing embedding leaves the semantic leg not-run', async () => {
+    const noVec = fakeSource('noVec', { bm25: [hit('noVec', '1', 1)] });
+    const res = await runHybridSearch([noVec], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(res.legs.semantic.status).toBe('not-run');
+    expect(res.legs.degraded).toBe(false);
+  });
+
+  it('mode:embeddings leaves the LEXICAL leg not-run, and that is not a degradation', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)], embedding: [hit('A', '2', 1)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'embeddings', embedder });
+    expect(res.legs.lexical.status).toBe('not-run');
+    expect(res.legs.degraded).toBe(false);
+  });
+
+  it('a throwing embedding source is a failed semantic call, not a blocked leg', async () => {
+    const bad = fakeSource('bad', { bm25: [hit('bad', '1', 1)], throwEmbed: true });
+    const res = await runHybridSearch([bad], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(res.legs.semantic).toMatchObject({ status: 'errored', callsFailed: 1, blocked: null });
+    expect(res.legs.warning).toContain('every semantic source call failed');
+  });
+
+  // ── THE MEASURED CASE (EI-19447237774252790), end-to-end ──
+  it('flags a hybrid search whose lexical leg ran perfectly but returned nothing', async () => {
+    // No error, nothing logged, embedderAvailable stays true — every pre-P-020
+    // signal reports health while the search is silently embeddings-only.
+    const a = fakeSource('A', { bm25: [], embedding: [hit('A', '2', 1)] });
+    const res = await runHybridSearch([a], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(res.embedderAvailable).toBe(true);
+    expect(res.legs.lexical).toMatchObject({ status: 'ran', candidates: 0 });
+    expect(res.legs.degraded).toBe(true);
+    expect(res.legs.warning).toContain('semantic-only');
+  });
+
+  it('runFullTextSearch reports the same shape from the other entry point', async () => {
+    const a = fakeSource('A', { bm25: [hit('A', '1', 1)] });
+    const res = await runFullTextSearch([a], baseCtx);
+    expect(res.legs.lexical).toMatchObject({ status: 'ran', candidates: 1 });
+    expect(res.legs.semantic.status).toBe('not-run');
+    expect(res.legs.degraded).toBe(false);
+  });
+});

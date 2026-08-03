@@ -371,13 +371,24 @@ export async function runHybridSearch(
     const runLeg = async (source: SearchSource, since: string | null): Promise<Listing | null> => {
       ctx.signal?.throwIfAborted();
       const label = since ? 'bm25-fresh' : 'bm25';
+      // P-020: EXECUTION accounting, recorded HERE rather than at the floor /
+      // fusion choke points below. Those two see only candidates, so they can
+      // never separate "the leg ran and found nothing" from "the leg never
+      // ran" — which is precisely the question `status` exists to answer, and
+      // the distinction the measured EI-19447237774252790 case turns on.
+      const leg = legOfRanker(label, legs);
+      leg.attempted = true;
       try {
         const params = sourceParams(source);
-        return await source.bm25(
+        const listing = await source.bm25(
           since ? { ...params, filters: { ...params.filters, since } } : params,
         );
+        leg.callsRun++;
+        return listing;
       } catch (err) {
         if (ctx.signal?.aborted) throw err;
+        leg.callsFailed++;
+        leg.failures.push({ source: source.name, ranker: label, error: (err as Error).message });
         ctx.log?.(`${label} ${source.name} skipped: ${(err as Error).message}`);
         return null;
       }
@@ -421,6 +432,13 @@ export async function runHybridSearch(
       // rejects. An EmbedTimeoutError or a genuine embedder failure is caught
       // here → queryVec stays null → BM25-only degrade (embedderAvailable=false).
       if (ctx.signal?.aborted) throw err;
+      // P-020: the semantic leg WAS wanted (an embedder is configured) but
+      // could not be attempted at all. That is `blocked` — distinct from a
+      // source call failing, and it must not read as `not-run`, which means
+      // "never wanted" and would make a dead embedder look like a plain
+      // lexical-only search.
+      legs.semantic.attempted = true;
+      legs.semantic.blocked = `query embed failed: ${(err as Error).message}`;
       ctx.log?.(`search:semantic query embed failed: ${(err as Error).message}`);
     }
   }
@@ -429,12 +447,24 @@ export async function runHybridSearch(
     const qVec = `[${queryVec.join(',')}]`;
     const embedLists = await Promise.all(
       sources.map(async (source) => {
+        // A source with no embedding query has no semantic leg to attempt.
+        // Leaving `attempted` false here is what makes "no registered source
+        // implements one" report `not-run` instead of a phantom failure.
         if (!source.embedding) return null;
         ctx.signal?.throwIfAborted();
+        legs.semantic.attempted = true;
         try {
-          return await source.embedding({ ...sourceParams(source), qVec });
+          const listing = await source.embedding({ ...sourceParams(source), qVec });
+          legs.semantic.callsRun++;
+          return listing;
         } catch (err) {
           if (ctx.signal?.aborted) throw err;
+          legs.semantic.callsFailed++;
+          legs.semantic.failures.push({
+            source: source.name,
+            ranker: 'embeddings',
+            error: (err as Error).message,
+          });
           ctx.log?.(`embed ${source.name} skipped: ${(err as Error).message}`);
           return null;
         }
@@ -490,5 +520,11 @@ export async function runHybridSearch(
     );
   }
 
-  return { results, totalHits: fused.length, embedderAvailable: !!queryVec, applied };
+  return {
+    results,
+    totalHits: fused.length,
+    embedderAvailable: !!queryVec,
+    applied,
+    legs: summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic)),
+  };
 }
