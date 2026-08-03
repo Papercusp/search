@@ -31,6 +31,14 @@ export {
 } from './hybrid';
 export { applyRecencyRerank, toMillis, type RecencyRank } from './recency';
 export {
+  hitProvenance,
+  isVectorOnly,
+  isLexicalRanker,
+  isSemanticRanker,
+  type MatchProvenance,
+  type HitProvenance,
+} from './provenance';
+export {
   applyMinScore,
   resolveMinScore,
   type MinScoreFloors,
