@@ -172,12 +172,12 @@ describe('configureSearchDefaults — the three-way contract', () => {
 
   it('replaces the whole policy on re-registration rather than merging it', () => {
     configureSearchDefaults({ minScore: () => ({ embeddings: 0.5 }) });
-    configureSearchDefaults({ recency: () => ({ weight: 1 }) });
+    configureSearchDefaults({ recency: () => ({ weight: 1, halfLifeMs: 86_400_000 }) });
     const ctx = { query: 'q', limit: 5, mode: 'hybrid' as const, embedder: null };
     const resolved = resolveSearchDefaults(ctx, {});
     // The first policy's floor must NOT survive into the second registration —
     // a half-applied policy is far harder to reason about than a replaced one.
     expect(resolved.minScore).toBeUndefined();
-    expect(resolved.recency).toEqual({ weight: 1 });
+    expect(resolved.recency).toEqual({ weight: 1, halfLifeMs: 86_400_000 });
   });
 });
