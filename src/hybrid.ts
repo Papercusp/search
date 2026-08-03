@@ -13,6 +13,7 @@ import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
 import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
 import { applyRecencyRerank, type RecencyRank } from './recency';
 import { applyMinScore, type MinScoreFloors } from './min-score';
+import { resolveSearchDefaults, type AppliedDefaults } from './defaults';
 
 export interface SearchContext {
   sql: PgHandle;
@@ -49,9 +50,12 @@ export interface SearchContext {
   embedTimeoutMs?: number;
   /** Optional recency re-rank applied to the fused candidate list BEFORE the
    *  top-N cut (so a recent-but-lower-relevance candidate in the `limit*3`
-   *  over-fetch pool can be rescued). Absent ⇒ ranking is byte-identical to
-   *  pure relevance. See {@link RecencyRank}. */
-  recency?: RecencyRank;
+   *  over-fetch pool can be rescued). See {@link RecencyRank}.
+   *
+   *  P-017: absent ⇒ the ENGINE DEFAULT applies (a host policy registered via
+   *  `configureSearchDefaults`), not "off". Pass `false` to force pure-relevance
+   *  ranking regardless of policy. */
+  recency?: RecencyRank | false;
   /** WI-4734: defer highlight computation to AFTER fusion, for the final top-N
    *  only. Applies per source and only to sources that implement
    *  `hydrateHighlights` (others keep inline highlights — safe mixed-source
@@ -66,23 +70,30 @@ export interface SearchContext {
    *  that does not implement the mode is free to ignore it. */
   lexicalMode?: 'and' | 'coverage-graded';
   /**
-   * Optional PER-RANKER minimum-score floors, applied to each ranker's list
-   * BEFORE fusion (see {@link MinScoreFloors}). Absent ⇒ no filtering, and
-   * ranking is byte-identical to the pre-floor engine.
+   * PER-RANKER minimum-score floors, applied to each ranker's list BEFORE
+   * fusion (see {@link MinScoreFloors}).
    *
    * This is the only stage at which a weak match can be rejected: RRF fuses
    * by rank position and discards the native score, so after fusion a rank-1
    * noise hit is indistinguishable from a rank-1 excellent one. Floors are
    * per-ranker because `ts_rank_cd` and cosine similarity are different
    * scales — one global number cannot floor both.
+   *
+   * P-017: absent ⇒ the ENGINE DEFAULT applies (a host policy registered via
+   * `configureSearchDefaults`), NOT "no floor" — that inversion is the whole
+   * point of the seam. Pass `false` to force the unfloored engine regardless
+   * of policy.
    */
-  minScore?: MinScoreFloors;
+  minScore?: MinScoreFloors | false;
   log?: (msg: string) => void;
 }
 
 export interface SearchResult {
   results: SearchHit[];
   totalHits: number;
+  /** P-017/P-020: which ranking features actually ran. Stated, never assumed —
+   *  a feature silently not applying is the exact failure this engine had. */
+  applied: AppliedDefaults;
 }
 
 /** BM25-only full-text search across the given sources (search:fulltext). */
@@ -90,6 +101,12 @@ export async function runFullTextSearch(
   sources: SearchSource[],
   ctx: SearchContext,
 ): Promise<SearchResult> {
+  // Resolve the ranking policy ONCE up front: caller value wins, `false` is a
+  // hard off, absent falls through to the registered engine default (P-017).
+  const { minScore, applied } = resolveSearchDefaults(
+    { query: ctx.query, limit: ctx.limit, mode: 'fulltext', embedder: null },
+    { minScore: ctx.minScore },
+  );
   const hits: SearchHit[] = [];
   for (const source of sources) {
     ctx.signal?.throwIfAborted();
@@ -106,7 +123,7 @@ export async function runFullTextSearch(
       // Floor before collecting: fulltext has no fusion stage, but the floor
       // means the same thing here — reject what the ranker itself scored as
       // noise, in the ranker's own units.
-      const { list, dropped, floor } = applyMinScore(listing, 'bm25', ctx.minScore);
+      const { list, dropped, floor } = applyMinScore(listing, 'bm25', minScore);
       if (dropped > 0) {
         ctx.log?.(
           `search:fulltext ${source.name} bm25 minScore ${floor} dropped ${dropped}/${listing.length}`,
@@ -124,7 +141,7 @@ export async function runFullTextSearch(
   }
   // Global re-rank by raw score across all sources, then top-N.
   hits.sort((a, b) => b.score - a.score);
-  return { results: hits.slice(0, ctx.limit), totalHits: hits.length };
+  return { results: hits.slice(0, ctx.limit), totalHits: hits.length, applied };
 }
 
 export interface HybridResult extends SearchResult {
@@ -201,6 +218,16 @@ export async function runHybridSearch(
   ctx: SearchContext & { mode: 'embeddings' | 'hybrid'; embedder: Embedder | null },
 ): Promise<HybridResult> {
   ctx.signal?.throwIfAborted();
+  // P-017: resolve the ranking policy ONCE, before any leg runs — the bm25 legs
+  // are floored long before the query vector settles, so this cannot wait on the
+  // embed. Resolving off the embedder INSTANCE (not "was a vector produced") is
+  // what makes that safe: a host keys its floor to the embedding space it
+  // calibrated, and if the vector leg never runs there are no embedding hits for
+  // an embedding floor to filter anyway.
+  const { minScore: minScoreFloors, recency: recencyRank, applied } = resolveSearchDefaults(
+    { query: ctx.query, limit: ctx.limit, mode: ctx.mode, embedder: ctx.embedder },
+    { minScore: ctx.minScore, recency: ctx.recency },
+  );
   // WI-4734: kick the query-embed off WITHOUT awaiting it — the BM25 legs don't
   // need the vector, so they run CONCURRENTLY with the embed instead of behind
   // it (the old serial shape put the whole embed latency on the critical path
@@ -226,7 +253,7 @@ export async function runHybridSearch(
   const keyOfRow = new Map<SearchHit, string>();
   /** Apply `ranker`'s floor (if any) to a source's list, logging what it cut. */
   const floorList = (list: Listing, ranker: string, sourceName: string): Listing => {
-    const { list: kept, dropped, floor } = applyMinScore(list, ranker, ctx.minScore);
+    const { list: kept, dropped, floor } = applyMinScore(list, ranker, minScoreFloors);
     if (dropped > 0) {
       ctx.log?.(
         `${ranker} ${sourceName} minScore ${floor} dropped ${dropped}/${list.length}`,
@@ -273,11 +300,11 @@ export async function runHybridSearch(
   // every recent match out of eligibility (WI-5097: the agents-pill search
   // returned nothing from the current day). Skipped when the caller's own
   // `since` filter is already as narrow or narrower.
-  const recencyWeight = ctx.recency ? Math.max(0, Math.min(1, ctx.recency.weight ?? 0.3)) : 0;
-  const freshWindowMs = ctx.recency?.freshWindowMs ?? 0;
+  const recencyWeight = recencyRank ? Math.max(0, Math.min(1, recencyRank.weight ?? 0.3)) : 0;
+  const freshWindowMs = recencyRank?.freshWindowMs ?? 0;
   let freshSinceIso: string | null = null;
   if (ctx.mode === 'hybrid' && recencyWeight > 0 && freshWindowMs > 0) {
-    const nowMs = ctx.recency?.now ?? Date.now();
+    const nowMs = recencyRank?.now ?? Date.now();
     const freshSinceMs = nowMs - freshWindowMs;
     const callerSinceMs = ctx.filters?.since ? Date.parse(ctx.filters.since) : NaN;
     if (!(Number.isFinite(callerSinceMs) && callerSinceMs >= freshSinceMs)) {
@@ -375,7 +402,7 @@ export async function runHybridSearch(
 
   const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);
   // Optional recency re-rank over the FULL candidate pool, before the top-N cut.
-  const fused = ctx.recency ? applyRecencyRerank(fusedRaw, ctx.recency) : fusedRaw;
+  const fused = recencyRank ? applyRecencyRerank(fusedRaw, recencyRank) : fusedRaw;
   const results = fused.slice(0, ctx.limit).map(({ row, score, rankers }) => {
     const key = keyOfRow.get(row);
     const native = key === undefined ? undefined : nativeByKey.get(key);
@@ -413,5 +440,5 @@ export async function runHybridSearch(
     );
   }
 
-  return { results, totalHits: fused.length, embedderAvailable: !!queryVec };
+  return { results, totalHits: fused.length, embedderAvailable: !!queryVec, applied };
 }

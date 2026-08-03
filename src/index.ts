@@ -44,4 +44,14 @@ export {
   type MinScoreFloors,
   type MinScoreOutcome,
 } from './min-score';
+export {
+  configureSearchDefaults,
+  resetSearchDefaults,
+  searchDefaultsHost,
+  resolveDefault,
+  resolveSearchDefaults,
+  type SearchDefaultsHost,
+  type SearchDefaultsContext,
+  type AppliedDefaults,
+} from './defaults';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';
