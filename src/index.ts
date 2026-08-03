@@ -45,6 +45,17 @@ export {
   type MinScoreOutcome,
 } from './min-score';
 export {
+  summariseLegs,
+  finaliseLeg,
+  newLegAccumulator,
+  legOfRanker,
+  type LegStatus,
+  type LegFailure,
+  type LegReport,
+  type SearchLegs,
+  type LegAccumulator,
+} from './legs';
+export {
   configureSearchDefaults,
   resetSearchDefaults,
   searchDefaultsHost,
