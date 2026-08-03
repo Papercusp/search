@@ -59,6 +59,12 @@ export interface SearchContext {
    *  highlighting computes ~6× more highlight expressions than the caller
    *  displays; deferral turns that into ONE batched hydration of `limit` rows. */
   deferHighlight?: boolean;
+  /** How the lexical leg combines the query's terms — see
+   *  {@link SearchSourceParams.lexicalMode}. Threaded through to every source
+   *  unchanged; absent ⇒ each source keeps its historical AND semantics, so
+   *  this is byte-identical for every caller that does not pass it. A source
+   *  that does not implement the mode is free to ignore it. */
+  lexicalMode?: 'and' | 'coverage-graded';
   /**
    * Optional PER-RANKER minimum-score floors, applied to each ranker's list
    * BEFORE fusion (see {@link MinScoreFloors}). Absent ⇒ no filtering, and
@@ -253,6 +259,10 @@ export async function runHybridSearch(
     // Only defer for a source that can hydrate afterwards; others keep inline
     // highlights so mixed-source calls stay correct.
     ...(ctx.deferHighlight && source.hydrateHighlights ? { wantHighlight: false } : {}),
+    // Passed through only when the caller asked for a non-default mode, so a
+    // source cannot tell "caller said 'and'" from "caller said nothing" — the
+    // two must behave identically and this makes that structural.
+    ...(ctx.lexicalMode && ctx.lexicalMode !== 'and' ? { lexicalMode: ctx.lexicalMode } : {}),
   });
 
   // Fresh-candidate window (RecencyRank.freshWindowMs): when the recency

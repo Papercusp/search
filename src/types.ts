@@ -93,6 +93,30 @@ export interface SearchSourceParams {
    *  Rationale: with `limit*3` over-fetch across two rankers, inline
    *  highlighting computes ~6× more `ts_headline`s than the caller displays. */
   wantHighlight?: boolean;
+  /**
+   * How the LEXICAL leg combines the query's terms. Optional; absent or
+   * `'and'` is the historical behaviour and must stay byte-identical.
+   *
+   * `'and'` — every lexeme must match (`plainto_tsquery`). Precise, and the
+   * reason query length is inversely proportional to recall: each extra term
+   * ELIMINATES documents.
+   *
+   * `'coverage-graded'` — anchor on the query's RAREST lexeme, admit any
+   * document also matching at least one other, and order by how many DISTINCT
+   * query lexemes each document matches before falling back to the native
+   * lexical score. Extra terms then ADD EVIDENCE instead of eliminating
+   * documents, and the result is a strict SUPERSET of `'and'` with the
+   * `'and'` rows ranked first.
+   *
+   * ⚠ The obvious implementation — plain disjunction scored by the native
+   * lexical rank — does NOT work, and fails in the expensive direction: a
+   * frequency/density ranker cannot express query-term coverage, so the
+   * documents matching every term sink far below the caller's cut while the
+   * result set looks larger. Sources implementing this mode must order by
+   * coverage FIRST. Measured on a real 421k-row corpus, that mistake put all
+   * seven all-terms documents at positions 36-427 for a caller admitting 6.
+   */
+  lexicalMode?: 'and' | 'coverage-graded';
 }
 
 /**
