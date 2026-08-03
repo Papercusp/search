@@ -14,6 +14,13 @@ import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Em
 import { applyRecencyRerank, type RecencyRank } from './recency';
 import { applyMinScore, type MinScoreFloors } from './min-score';
 import { resolveSearchDefaults, type AppliedDefaults } from './defaults';
+import {
+  newLegAccumulator,
+  legOfRanker,
+  finaliseLeg,
+  summariseLegs,
+  type SearchLegs,
+} from './legs';
 
 export interface SearchContext {
   sql: PgHandle;
@@ -94,6 +101,18 @@ export interface SearchResult {
   /** P-017/P-020: which ranking features actually ran. Stated, never assumed —
    *  a feature silently not applying is the exact failure this engine had. */
   applied: AppliedDefaults;
+  /**
+   * P-020: which RANKING LEGS actually ran and what each contributed to
+   * fusion. Reported on every result so a silently single-legged search
+   * cannot look like a healthy one — `legs.degraded` + `legs.warning` are the
+   * ready-made verdict; the per-leg counts are there when you need the why.
+   *
+   * ⚠ Read this, not `embedderAvailable`, to answer "did semantic really
+   * happen": that flag only says a query VECTOR was produced, which stays
+   * true when every per-source embedding query fails and when a leg runs
+   * perfectly but returns nothing (EI-19447237774252790).
+   */
+  legs: SearchLegs;
 }
 
 /** BM25-only full-text search across the given sources (search:fulltext). */
@@ -107,9 +126,15 @@ export async function runFullTextSearch(
     { query: ctx.query, limit: ctx.limit, mode: 'fulltext', embedder: null },
     { minScore: ctx.minScore },
   );
+  // P-020: a fulltext search has one leg by construction. Report it anyway —
+  // a caller must be able to read the SAME shape from both entry points, and a
+  // source that failed here is just as invisible as it is in hybrid.
+  const lexicalLeg = newLegAccumulator();
+  const semanticLeg = newLegAccumulator();
   const hits: SearchHit[] = [];
   for (const source of sources) {
     ctx.signal?.throwIfAborted();
+    lexicalLeg.attempted = true;
     try {
       const listing = await source.bm25({
         sql: ctx.sql,
@@ -124,6 +149,9 @@ export async function runFullTextSearch(
       // means the same thing here — reject what the ranker itself scored as
       // noise, in the ranker's own units.
       const { list, dropped, floor } = applyMinScore(listing, 'bm25', minScore);
+      lexicalLeg.callsRun++;
+      lexicalLeg.candidates += list.length;
+      lexicalLeg.floored += dropped;
       if (dropped > 0) {
         ctx.log?.(
           `search:fulltext ${source.name} bm25 minScore ${floor} dropped ${dropped}/${listing.length}`,
@@ -136,12 +164,23 @@ export async function runFullTextSearch(
       // Abort outranks graceful degradation: a cancelled search must reject,
       // not be "skipped" into a quiet partial result.
       if (ctx.signal?.aborted) throw err;
+      lexicalLeg.callsFailed++;
+      lexicalLeg.failures.push({
+        source: source.name,
+        ranker: 'bm25',
+        error: (err as Error).message,
+      });
       ctx.log?.(`search:fulltext ${source.name} skipped: ${(err as Error).message}`);
     }
   }
   // Global re-rank by raw score across all sources, then top-N.
   hits.sort((a, b) => b.score - a.score);
-  return { results: hits.slice(0, ctx.limit), totalHits: hits.length, applied };
+  return {
+    results: hits.slice(0, ctx.limit),
+    totalHits: hits.length,
+    applied,
+    legs: summariseLegs(finaliseLeg(lexicalLeg), finaliseLeg(semanticLeg)),
+  };
 }
 
 export interface HybridResult extends SearchResult {
@@ -240,6 +279,12 @@ export async function runHybridSearch(
   // and properly handled — below).
   embedP?.catch(() => {});
 
+  // P-020: per-leg execution accounting. Fed at the two choke points every
+  // candidate must pass through (`floorList` for what the floor removed,
+  // `recordInput` for what actually reached fusion), so a new ranker leg
+  // cannot be added later and quietly go unreported.
+  const legs = { lexical: newLegAccumulator(), semantic: newLegAccumulator() };
+
   // Over-fetch per source so RRF has fusion headroom before the top-N cut.
   const candidateLimit = ctx.limit * 3;
   const inputs: Array<{ name: string; list: Listing }> = [];
@@ -254,6 +299,7 @@ export async function runHybridSearch(
   /** Apply `ranker`'s floor (if any) to a source's list, logging what it cut. */
   const floorList = (list: Listing, ranker: string, sourceName: string): Listing => {
     const { list: kept, dropped, floor } = applyMinScore(list, ranker, minScoreFloors);
+    legOfRanker(ranker, legs).floored += dropped;
     if (dropped > 0) {
       ctx.log?.(
         `${ranker} ${sourceName} minScore ${floor} dropped ${dropped}/${list.length}`,
@@ -263,6 +309,10 @@ export async function runHybridSearch(
   };
   /** Record a floored list's native scores, then enqueue it as an RRF input. */
   const recordInput = (ranker: string, list: Listing): void => {
+    // Counted here rather than at the query: this is the post-floor,
+    // post-dedupe list fusion genuinely sees, which is the only number that
+    // distinguishes "the leg ran" from "the leg contributed".
+    legOfRanker(ranker, legs).candidates += list.length;
     for (const entry of list) {
       keyOfRow.set(entry.row, entry.key);
       const existing = nativeByKey.get(entry.key);
