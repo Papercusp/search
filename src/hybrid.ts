@@ -76,6 +76,10 @@ export interface SearchContext {
    *  this is byte-identical for every caller that does not pass it. A source
    *  that does not implement the mode is free to ignore it. */
   lexicalMode?: 'and' | 'coverage-graded';
+  /** `coverage-graded` only: the anchor's cost budget in summed per-lexeme
+   *  document frequency — see {@link SearchSourceParams.lexicalAnchorDfBudget}.
+   *  Threaded through unchanged; absent ⇒ each source keeps its own default. */
+  lexicalAnchorDfBudget?: number;
   /**
    * PER-RANKER minimum-score floors, applied to each ranker's list BEFORE
    * fusion (see {@link MinScoreFloors}).
@@ -340,6 +344,13 @@ export async function runHybridSearch(
     // source cannot tell "caller said 'and'" from "caller said nothing" — the
     // two must behave identically and this makes that structural.
     ...(ctx.lexicalMode && ctx.lexicalMode !== 'and' ? { lexicalMode: ctx.lexicalMode } : {}),
+    // Same rule as lexicalMode above: passed through ONLY when the caller set
+    // it, so a source cannot tell "caller said nothing" from "caller said the
+    // default". 0 is a MEANINGFUL value here (argmin-only), so test for
+    // undefined rather than truthiness.
+    ...(ctx.lexicalAnchorDfBudget === undefined
+      ? {}
+      : { lexicalAnchorDfBudget: ctx.lexicalAnchorDfBudget }),
   });
 
   // Fresh-candidate window (RecencyRank.freshWindowMs): when the recency

@@ -117,6 +117,21 @@ export interface SearchSourceParams {
    * seven all-terms documents at positions 36-427 for a caller admitting 6.
    */
   lexicalMode?: 'and' | 'coverage-graded';
+  /**
+   * `coverage-graded` only: a cost budget for the candidate-narrowing anchor,
+   * expressed in summed per-lexeme document frequency.
+   *
+   * Grading every disjunctive match is correct but unaffordable, so a source
+   * implementing this mode narrows to an anchor set first. Anchoring on the
+   * SINGLE rarest lexeme is the cheapest such narrowing and also a rarity
+   * SELECTOR — it silently requires every result to contain the query's rarest
+   * term, which drops high-coverage documents that merely lack it. Budgeting the
+   * anchor over summed df bounds the same cost without that side effect.
+   *
+   * Absent ⇒ the source's own default. `0` ⇒ anchor on the single rarest lexeme
+   * (the degenerate case), which is what a paired control arm passes.
+   */
+  lexicalAnchorDfBudget?: number;
 }
 
 /**
