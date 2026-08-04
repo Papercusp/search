@@ -107,6 +107,19 @@ export interface SearchLegs {
   warning: string | null;
 }
 
+/**
+ * The report for a search that ran no legs at all — every leg `not-run`, and
+ * therefore NOT degraded (nothing was attempted, so nothing silently failed).
+ *
+ * For a host that constructs a `SearchResult` without going through the
+ * engine. Using this instead of hand-writing the shape keeps such a result
+ * honest: it says "no leg information" rather than fabricating health, and it
+ * cannot drift out of sync when a leg is added here.
+ */
+export function emptyLegs(): SearchLegs {
+  return summariseLegs(finaliseLeg(newLegAccumulator()), finaliseLeg(newLegAccumulator()));
+}
+
 /** Mutable per-leg counters the engine feeds while a search runs. */
 export interface LegAccumulator {
   attempted: boolean;

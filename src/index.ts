@@ -49,6 +49,7 @@ export {
   finaliseLeg,
   newLegAccumulator,
   legOfRanker,
+  emptyLegs,
   type LegStatus,
   type LegFailure,
   type LegReport,
