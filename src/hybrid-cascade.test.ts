@@ -278,6 +278,71 @@ describe('lexical cascade — leg scoping', () => {
   });
 });
 
+describe('lexical cascade — stage2Added is REPORTED, not just returned', () => {
+  // D-058/D-059: `lexicalWithCascade` computed this number from the start, but
+  // both call sites destructured only `{ listing }` and dropped it — so "did
+  // the widening actually widen anything?" was unanswerable from outside the
+  // engine. That is the same discard-the-leg-report defect the cascade's own
+  // docblock cites as its motivation, reproduced inside it.
+
+  it('reports how many rows stage 2 appended', async () => {
+    const src = cascadingSource('S', {
+      and: [hit('S', 'a', 9)],
+      graded: [hit('S', 'a', 9), hit('S', 'g1', 5), hit('S', 'g2', 4)],
+    });
+    const res = await runFullTextSearch([src], baseCtx);
+
+    expect(res.legs.lexical.stage2Added).toBe(2);
+    expect(res.legs.lexical.candidates).toBe(3);
+  });
+
+  it('reports 0 when the cascade did not fire', async () => {
+    const src = cascadingSource('S', {
+      and: [hit('S', 'a', 9), hit('S', 'b', 8)],
+      graded: [hit('S', 'g1', 5)],
+    });
+    const res = await runFullTextSearch([src], { ...baseCtx, limit: 2 });
+
+    expect(res.legs.lexical.stage2Added).toBe(0);
+  });
+
+  it('DISTINGUISHES the two zeros — stage 2 silent vs stage 2 never asked', async () => {
+    // This is the whole diagnostic point. Both runs return an empty page and
+    // `candidates: 0`; only `stage2Added` plus the cascade's enablement
+    // separates "the wider mode does not reach this query either" (evidence
+    // FOR a different lexical engine) from "the widening never ran".
+    const silentBoth = cascadingSource('S', { and: [], graded: [] });
+    const ranButFoundNothing = await runFullTextSearch([silentBoth], baseCtx);
+
+    const optedOut = cascadingSource('S', { and: [], graded: [hit('S', 'g1', 5)] });
+    const neverAsked = await runFullTextSearch([optedOut], { ...baseCtx, lexicalCascade: false });
+
+    expect(ranButFoundNothing.legs.lexical.candidates).toBe(0);
+    expect(ranButFoundNothing.legs.lexical.stage2Added).toBe(0);
+    expect(silentBoth.calls).toHaveLength(2); // stage 2 WAS asked, and had nothing
+
+    expect(neverAsked.legs.lexical.candidates).toBe(0);
+    expect(neverAsked.legs.lexical.stage2Added).toBe(0);
+    expect(optedOut.calls).toHaveLength(1); // stage 2 never asked — rows were available
+  });
+
+  it('reports the widening through the hybrid entrypoint too', async () => {
+    const src = cascadingSource('S', {
+      and: [hit('S', 'a', 9)],
+      graded: [hit('S', 'g1', 5), hit('S', 'g2', 4)],
+    });
+    const res = await runHybridSearch([src], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder: null,
+      recency: false,
+    });
+
+    expect(res.legs.lexical.stage2Added).toBe(2);
+    expect(res.legs.semantic.stage2Added).toBe(0);
+  });
+});
+
 describe('lexical cascade — page-level scope of the guarantee', () => {
   it('append-only is per-SOURCE; a multi-source page is still cut globally by score', async () => {
     // CHARACTERISATION, not an endorsement. `runFullTextSearch` concatenates

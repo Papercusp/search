@@ -483,7 +483,7 @@ describe('WI-4734 — deferred highlight hydration (deferHighlight)', () => {
   it('without deferHighlight the seam is inert — no wantHighlight, no hydration call', async () => {
     const { src, seen, hydrate } = deferringSource('A', [hit('A', '1', 1)]);
     await runHybridSearch([src], { ...baseCtx, mode: 'hybrid', embedder: null });
-    expect(seen).toEqual([undefined]);
+    expectEveryCallSaw(seen, undefined);
     expect(hydrate).not.toHaveBeenCalled();
   });
 });
@@ -628,11 +628,15 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
       filters: { since: iso(NOW - 30 * 24 * H) },
     });
     expect(legCalls(src2.lexical)).toHaveLength(2);
-    expect(src2.lexical).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        filters: expect.objectContaining({ since: iso(NOW - 48 * H) }),
-      }),
+    // Identify the fresh leg by the clamped `since` it carries, NOT by call
+    // order: the main leg and the fresh leg start in one Promise.all, so the
+    // main leg's cascade stage-2 re-query resolves after the fresh call and
+    // would be the "last" one. Order was always incidental here; the clamp is
+    // the actual claim.
+    const freshCall = legCalls(src2.lexical).find(
+      (p) => p.filters?.since === iso(NOW - 48 * H),
     );
+    expect(freshCall, 'a fresh leg clamped to the 48h window').toBeDefined();
   });
 
   it('never runs a fresh leg in embeddings-only mode (it is a BM25 construct)', async () => {
