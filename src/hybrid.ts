@@ -13,6 +13,7 @@ import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
 import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
 import { applyRecencyRerank, type RecencyRank } from './recency';
 import { applyMinScore, type MinScoreFloors } from './min-score';
+import { pickTopGroups, countGroups, type GroupKeyOf } from './group';
 import { resolveSearchDefaults, type AppliedDefaults } from './defaults';
 import {
   newLegAccumulator,
@@ -63,6 +64,23 @@ export interface SearchContext {
    *  `configureSearchDefaults`), not "off". Pass `false` to force pure-relevance
    *  ranking regardless of policy. */
   recency?: RecencyRank | false;
+  /** Optional ROLLUP applied to the fused candidate list immediately before the
+   *  top-N cut: when set, the page keeps only the best-ranked row per group, so
+   *  `limit` counts DISTINCT GROUPS rather than raw rows (P-036).
+   *
+   *  For a caller that ranks rows but PRESENTS something coarser — the
+   *  transcript search ranks session turns and renders session cards — several
+   *  turns from one session otherwise consume several page slots while covering
+   *  one card (measured 2026-08-09: the top-30 `theory` turns covered 24
+   *  distinct sessions). This cannot be fixed by the caller after the fact,
+   *  because the rows that would back-fill the freed slots are past `limit` and
+   *  already discarded; hence a cut-time hook rather than a post-filter.
+   *
+   *  Absent ⇒ byte-identical row-level behaviour. Returning null/undefined for a
+   *  row leaves it ungrouped (it keeps its own slot). NOT a scoring change: it
+   *  cannot promote a group no member row reached the candidate pool with. See
+   *  {@link pickTopGroups}. */
+  groupBy?: GroupKeyOf;
   /** WI-4734: defer highlight computation to AFTER fusion, for the final top-N
    *  only. Applies per source and only to sources that implement
    *  `hydrateHighlights` (others keep inline highlights — safe mixed-source
@@ -102,6 +120,11 @@ export interface SearchContext {
 export interface SearchResult {
   results: SearchHit[];
   totalHits: number;
+  /** Distinct groups in the FULL candidate pool, present only when a
+   *  `groupBy` rollup ran. `totalHits` counts rows and so cannot answer "30 of
+   *  how many sessions?" on a grouped page; this can. Optional rather than
+   *  required precisely so no existing caller or fixture is stranded. */
+  totalGroups?: number;
   /** P-017/P-020: which ranking features actually ran. Stated, never assumed —
    *  a feature silently not applying is the exact failure this engine had. */
   applied: AppliedDefaults;
@@ -494,7 +517,15 @@ export async function runHybridSearch(
   const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);
   // Optional recency re-rank over the FULL candidate pool, before the top-N cut.
   const fused = recencyRank ? applyRecencyRerank(fusedRaw, recencyRank) : fusedRaw;
-  const results = fused.slice(0, ctx.limit).map(({ row, score, rankers }) => {
+  // P-036: the optional rollup sits BETWEEN the re-rank and the cut — the only
+  // point where the full pool is in final order and still intact. Ordering
+  // matters: rolling up before the recency re-rank would pick each group's
+  // representative by relevance alone and then let the re-rank reorder a page
+  // whose members were already chosen, which is not the same page.
+  const page = ctx.groupBy
+    ? pickTopGroups(fused, ctx.groupBy, ctx.limit)
+    : fused.slice(0, ctx.limit);
+  const results = page.map(({ row, score, rankers }) => {
     const key = keyOfRow.get(row);
     const native = key === undefined ? undefined : nativeByKey.get(key);
     // Copy: `nativeByKey` keeps accumulating per-key state and callers mutate
@@ -534,6 +565,7 @@ export async function runHybridSearch(
   return {
     results,
     totalHits: fused.length,
+    ...(ctx.groupBy ? { totalGroups: countGroups(fused, ctx.groupBy) } : {}),
     embedderAvailable: !!queryVec,
     applied,
     legs: summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic)),

@@ -30,6 +30,7 @@ export {
   type HybridResult,
 } from './hybrid';
 export { applyRecencyRerank, toMillis, type RecencyRank } from './recency';
+export { pickTopGroups, countGroups, type GroupKeyOf } from './group';
 export {
   hitProvenance,
   isVectorOnly,
