@@ -77,6 +77,23 @@ export interface LegReport {
   /** Rows removed by the min-score floor before fusion. See the header note on
    *  why this is reported separately from `candidates`. */
   floored: number;
+  /**
+   * Rows APPENDED by the lexical cascade's second stage — the widening that
+   * fires when the historical AND query under-fills (see
+   * `SearchContext.lexicalCascade`). Always 0 for the semantic leg, and 0 on
+   * the lexical leg whenever stage 2 did not fire OR fired and found nothing
+   * new.
+   *
+   * Reported rather than merely returned because the two zeros above are the
+   * whole question: `stage2Added: 0` on a query whose AND stage was SILENT
+   * (`candidates: 0` with the cascade enabled) says the wider mode does not
+   * reach that query either — which is evidence FOR a different lexical
+   * engine, not for tuning this one. Without this number that distinction is
+   * unobservable from outside, and the engine's own docblock cites six
+   * surfaces silently discarding the leg report as the defect it exists to
+   * prevent.
+   */
+  stage2Added: number;
   /** Source-leg calls that returned. A source can be called more than once in
    *  one leg (the recency `lexical-fresh` window), so this counts CALLS, not
    *  distinct sources. */
@@ -125,6 +142,8 @@ export interface LegAccumulator {
   attempted: boolean;
   candidates: number;
   floored: number;
+  /** See {@link LegReport.stage2Added}. */
+  stage2Added: number;
   callsRun: number;
   callsFailed: number;
   failures: LegFailure[];
@@ -137,6 +156,7 @@ export function newLegAccumulator(): LegAccumulator {
     attempted: false,
     candidates: 0,
     floored: 0,
+    stage2Added: 0,
     callsRun: 0,
     callsFailed: 0,
     failures: [],
@@ -171,6 +191,7 @@ export function finaliseLeg(acc: LegAccumulator): LegReport {
     status,
     candidates: acc.candidates,
     floored: acc.floored,
+    stage2Added: acc.stage2Added,
     callsRun: acc.callsRun,
     callsFailed: acc.callsFailed,
     failures: acc.failures,
