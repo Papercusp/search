@@ -455,27 +455,42 @@ export async function runHybridSearch(
       // is filtered out here, leaving nothing to push.
       const alreadyPooled = new Set((list ?? []).map((entry) => entry.key));
       const freshOnly = fresh ? fresh.filter((entry) => !alreadyPooled.has(entry.key)) : null;
-      // The dedupe above removed the DOUBLE-COUNT; this removes the remaining
-      // RANK-SCALE MISMATCH, which is the larger of the two effects (measured
-      // 2026-08-09, D-044: the fresh leg cost the owner-reported `theory` query
-      // 2 of its 3 recoverable ground-truth sessions).
+      // ⚠ DO NOT RE-ADD A `rankOffset` HERE WITHOUT READING D-047 FIRST.
       //
-      // What survives the dedupe is, BY CONSTRUCTION, exactly the rows the
-      // relevance-only cut MISSED — i.e. rows the main leg already beat. Fused
-      // as an independent input they are re-indexed from 0 against nothing but
-      // each other, so the best of them collects 1/(k+1): the identical
-      // contribution the single best row in the whole corpus receives. A weak
-      // row re-ranked in an empty pool outranks strong rows it genuinely lost
-      // to.
+      // There is a REAL and still-unresolved rank-scale problem in this leg:
+      // what survives the dedupe is, BY CONSTRUCTION, exactly the rows the
+      // relevance-only cut MISSED — rows the main leg already beat. Fused as an
+      // independent input they are re-indexed from 0 against nothing but each
+      // other, so the best of them collects 1/(k+1): the identical contribution
+      // the single best row in the whole corpus receives. That is measured
+      // (D-044) and it cost the owner-reported `theory` query real recall.
       //
-      // Offsetting by the main list's length continues that ranking instead of
-      // restarting it, which is where these rows actually stand. They keep
-      // their SEAT in the pool (WI-5097's purpose, and the recency re-rank can
-      // still lift them on merit) and keep their `lexical-fresh` provenance
-      // label, which hitProvenance and corpus-recall's agreement measure both
-      // read.
+      // The obvious correction — `recordInput('lexical-fresh', freshOnly,
+      // list.length)`, continuing the main ranking instead of restarting it —
+      // WAS SHIPPED ON 2026-08-09 AND REVERTED THE SAME HOUR. It is not merely
+      // imperfect; at the default weight it makes WI-5097's rescue
+      // ARITHMETICALLY IMPOSSIBLE, and it broke a guard that had been stable
+      // since 2026-07-16:
+      //
+      //   applyRecencyRerank's 'linear' mode RANK-normalises relevance
+      //   (normRel = 1 - rank/(n-1), see recency.ts). Offsetting by the FULL
+      //   main-list length places every fresh-only row strictly BELOW every
+      //   main-list row, so a lone rescued row lands last ⇒ normRel is exactly
+      //   0. The blend is (1-w)·normRel + w·decay, so at w=0.3 its ceiling is
+      //   0.3·1 = 0.3, while any first-place stale row floors at 0.7·1 = 0.7.
+      //   No decay value can close that gap. The seat is granted and the rescue
+      //   is then unwinnable — which is precisely the bug WI-5097 fixed and
+      //   D-004 says must never be re-opened.
+      //
+      // So the two constraints are in genuine tension and the resolution is a
+      // TUNING question, not a sign flip: the offset must be large enough to
+      // deny a fresh-only row the corpus-best contribution, yet small enough to
+      // leave it above last place so decay can still lift it. That point must
+      // be measured against BOTH guards — this test file AND the P-015 owner
+      // eval — never against either alone. Tracked on plan
+      // semantic-search-fingerprint-coverage-2026-08-03.
       if (freshOnly && freshOnly.length > 0) {
-        recordInput('lexical-fresh', freshOnly, list?.length ?? 0);
+        recordInput('lexical-fresh', freshOnly);
       }
     }
   }
