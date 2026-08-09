@@ -239,7 +239,7 @@ export async function runFullTextSearch(
       // empty AND query returns an EMPTY PAGE. Measured on the live corpus, the
       // AND leg returns zero rows for 30% of 1-2 term, 50% of 3-14 term and 70%
       // of 15+ term REAL queries (D-056).
-      const { listing } = await lexicalWithCascade(
+      const { listing, stage2Added } = await lexicalWithCascade(
         source,
         {
           sql: ctx.sql,
@@ -263,6 +263,7 @@ export async function runFullTextSearch(
       lexicalLeg.callsRun++;
       lexicalLeg.candidates += list.length;
       lexicalLeg.floored += dropped;
+      lexicalLeg.stage2Added += stage2Added;
       if (dropped > 0) {
         ctx.log?.(
           `search:fulltext ${source.name} lexical minScore ${floor} dropped ${dropped}/${listing.length}`,
@@ -515,11 +516,12 @@ export async function runHybridSearch(
           leg.callsRun++;
           return listing;
         }
-        const { listing } = await lexicalWithCascade(source, params, {
+        const { listing, stage2Added } = await lexicalWithCascade(source, params, {
           enabled: ctx.lexicalCascade !== false,
           callerSetMode: ctx.lexicalMode !== undefined,
         });
         leg.callsRun++;
+        leg.stage2Added += stage2Added;
         return listing;
       } catch (err) {
         if (ctx.signal?.aborted) throw err;

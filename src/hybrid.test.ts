@@ -50,6 +50,39 @@ function fakeSource(
 
 const baseCtx: SearchContext = { sql, query: 'q', workspaceId: 'w', scopeFilter: null, limit: 5 };
 
+/**
+ * The calls a source's lexical leg received, EXCLUDING the cascade's stage-2
+ * re-query (WI-37582: `lexicalMode:'coverage-graded'`, fired whenever stage 1
+ * under-fills — which these in-memory doubles nearly always do).
+ *
+ * Every call-count assertion below is a PROXY for "how many LEGS ran" (a fresh
+ * leg? a serial embed?), and a raw count stopped answering that question once
+ * one leg could issue two queries. Filtering by mode restores the question the
+ * assertion is actually asking instead of relaxing the number until it passes
+ * — the cascade's own coverage lives in hybrid-cascade.test.ts.
+ */
+function legCalls(fn: unknown): SearchSourceParams[] {
+  const calls = (fn as { mock: { calls: unknown[][] } }).mock.calls;
+  return calls
+    .map((c) => c[0] as SearchSourceParams)
+    .filter((p) => p?.lexicalMode !== 'coverage-graded');
+}
+
+/**
+ * Assert EVERY lexical call — stage 1 AND any cascade stage-2 re-query — was
+ * given the same `wantHighlight`.
+ *
+ * Deliberately stronger than the fixed-length array this replaced: the
+ * deferral seam is only correct if stage 2 INHERITS the flag, so a widened
+ * search would otherwise compute inline highlights for exactly the rows the
+ * deferral exists to avoid computing them for. A fixed-length assertion could
+ * not express that — it could only be satisfied by suppressing the cascade.
+ */
+function expectEveryCallSaw(seen: Array<boolean | undefined>, want: boolean | undefined): void {
+  expect(seen.length).toBeGreaterThan(0);
+  expect(seen.filter((v) => v !== want)).toEqual([]);
+}
+
 describe('runFullTextSearch', () => {
   it('fans out across sources, re-ranks globally by score, reports totalHits', async () => {
     const a = fakeSource('A', { lexical: [hit('A', '1', 3), hit('A', '2', 1)] });
@@ -362,7 +395,7 @@ describe('WI-4734 — embed ∥ BM25 concurrency', () => {
       embedTimeoutMs: 500,
     });
     expect(res.embedderAvailable).toBe(true);
-    expect(src.lexical).toHaveBeenCalledTimes(1);
+    expect(legCalls(src.lexical)).toHaveLength(1);
     expect(src.embedding).toHaveBeenCalledTimes(1);
     const ids = res.results.map((h) => h.source_id);
     expect(ids).toContain('kw');
@@ -400,7 +433,7 @@ describe('WI-4734 — deferred highlight hydration (deferHighlight)', () => {
       embedder: null,
       deferHighlight: true,
     });
-    expect(seen).toEqual([false]);
+    expectEveryCallSaw(seen, false);
     expect(hydrate).toHaveBeenCalledTimes(1);
     const hydratedIds = hydrate.mock.calls[0][1] as string[];
     expect(hydratedIds).toHaveLength(2); // final top-N only, never the 3-candidate pool
@@ -424,7 +457,7 @@ describe('WI-4734 — deferred highlight hydration (deferHighlight)', () => {
       embedder: null,
       deferHighlight: true,
     });
-    expect(seen).toEqual([undefined]);
+    expectEveryCallSaw(seen, undefined);
     expect(res.results[0].highlight).toBe('hl-1'); // the inline highlight survived
   });
 
@@ -576,7 +609,7 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
     for (const rec of [undefined, { ...recency, weight: 0 }, { ...recency, freshWindowMs: 0 }]) {
       const src = timedSource('A', corpus);
       await runHybridSearch([src], { ...baseCtx, mode: 'hybrid', embedder: null, recency: rec });
-      expect(src.lexical).toHaveBeenCalledTimes(1);
+      expect(legCalls(src.lexical)).toHaveLength(1);
     }
   });
 
@@ -586,7 +619,7 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
       ...baseCtx, mode: 'hybrid', embedder: null, recency,
       filters: { since: iso(NOW - 24 * H) }, // narrower than the 48h window
     });
-    expect(src.lexical).toHaveBeenCalledTimes(1);
+    expect(legCalls(src.lexical)).toHaveLength(1);
 
     // A WIDER caller window still gets the fresh leg (clamped to the window).
     const src2 = timedSource('B', corpus);
@@ -594,7 +627,7 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
       ...baseCtx, mode: 'hybrid', embedder: null, recency,
       filters: { since: iso(NOW - 30 * 24 * H) },
     });
-    expect(src2.lexical).toHaveBeenCalledTimes(2);
+    expect(legCalls(src2.lexical)).toHaveLength(2);
     expect(src2.lexical).toHaveBeenLastCalledWith(
       expect.objectContaining({
         filters: expect.objectContaining({ since: iso(NOW - 48 * H) }),
