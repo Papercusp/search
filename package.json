@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Host-agnostic BM25 + pgvector hybrid search over Postgres. The host registers pluggable SearchSources (each owning its tsvector/pgvector SQL); the engine runs BM25-only or BM25+embeddings fused via Reciprocal Rank Fusion. PG handle + query embedder are injected — zero schema coupling, zero embedding-provider dependency.",
+  "description": "Host-agnostic lexical + pgvector hybrid search over Postgres. The host registers pluggable SearchSources (each owning its tsvector/pgvector SQL); the engine runs lexical-only or lexical+embeddings fused via Reciprocal Rank Fusion. The lexical ranker is Postgres ts_rank_cd (cover density), NOT Okapi BM25. PG handle + query embedder are injected — zero schema coupling, zero embedding-provider dependency.",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
