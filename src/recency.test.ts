@@ -6,7 +6,7 @@ import type { SearchHit } from './types';
 const NOW = Date.parse('2026-07-12T12:00:00Z');
 const DAY = 86_400_000;
 
-function fi(id: string, score: number, ts: string | number | null, rankers = ['bm25']): FusedItem<SearchHit> {
+function fi(id: string, score: number, ts: string | number | null, rankers = ['lexical']): FusedItem<SearchHit> {
   return {
     row: { source: 'session_turn', source_id: id, excerpt: '', highlight: '', score, rankers, ts },
     score,

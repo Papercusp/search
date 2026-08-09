@@ -31,8 +31,8 @@ function ranked(h: SearchHit): RankedItem<SearchHit> {
 function listing(...hits: SearchHit[]): Listing {
   return hits.map(ranked);
 }
-function fakeSource(name: string, opts: { bm25?: SearchHit[]; embedding?: SearchHit[] } = {}): SearchSource {
-  const src: SearchSource = { name, bm25: vi.fn(async () => listing(...(opts.bm25 ?? []))) };
+function fakeSource(name: string, opts: { lexical?: SearchHit[]; embedding?: SearchHit[] } = {}): SearchSource {
+  const src: SearchSource = { name, lexical: vi.fn(async () => listing(...(opts.lexical ?? []))) };
   if (opts.embedding) src.embedding = vi.fn(async () => listing(...(opts.embedding ?? [])));
   return src;
 }
@@ -44,7 +44,7 @@ const embedder: Embedder = async () => [0.1, 0.2, 0.3];
  *  the sparsely-embedded-corpus shape the floor exists to reject. */
 function vectorSource(): SearchSource {
   return fakeSource('V', {
-    bm25: [],
+    lexical: [],
     embedding: [hit('V', 'strong', 0.9), hit('V', 'noise', 0.1)],
   });
 }
@@ -129,7 +129,7 @@ describe('configureSearchDefaults — the three-way contract', () => {
     // 'old' outranks 'new' on pure relevance; recency must rescue 'new'.
     // `RecencyRank.getTime` defaults to reading `hit.ts`.
     const src = fakeSource('R', {
-      bm25: [
+      lexical: [
         { ...hit('R', 'old', 0.9), ts: new Date(now - 90 * 86_400_000).toISOString() },
         { ...hit('R', 'new', 0.4), ts: new Date(now - 60_000).toISOString() },
       ] as SearchHit[],
@@ -160,14 +160,14 @@ describe('configureSearchDefaults — the three-way contract', () => {
     configureSearchDefaults({
       minScore: (ctx) => {
         seen.push(ctx.mode);
-        return { bm25: 0.5 };
+        return { lexical: 0.5 };
       },
     });
-    const src = fakeSource('F', { bm25: [hit('F', 'strong', 0.9), hit('F', 'noise', 0.1)] });
+    const src = fakeSource('F', { lexical: [hit('F', 'strong', 0.9), hit('F', 'noise', 0.1)] });
     const res = await runFullTextSearch([src], baseCtx);
     expect(seen).toEqual(['fulltext']);
     expect(res.results.map((h) => h.source_id)).toEqual(['strong']);
-    expect(res.applied.minScore).toEqual({ bm25: 0.5 });
+    expect(res.applied.minScore).toEqual({ lexical: 0.5 });
   });
 
   it('replaces the whole policy on re-registration rather than merging it', () => {

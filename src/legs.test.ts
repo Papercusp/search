@@ -54,7 +54,7 @@ describe('finaliseLeg — status derivation', () => {
         attempted: true,
         callsRun: 1,
         callsFailed: 1,
-        failures: [{ source: 'S', ranker: 'bm25', error: 'boom' }],
+        failures: [{ source: 'S', ranker: 'lexical', error: 'boom' }],
       }),
     );
     expect(leg.status).toBe('ran');
@@ -77,8 +77,8 @@ describe('finaliseLeg — status derivation', () => {
 describe('legOfRanker — routing', () => {
   it('routes every lexical ranker to the lexical leg and vectors to semantic', () => {
     const legs = { lexical: newLegAccumulator(), semantic: newLegAccumulator() };
-    expect(legOfRanker('bm25', legs)).toBe(legs.lexical);
-    expect(legOfRanker('bm25-fresh', legs)).toBe(legs.lexical);
+    expect(legOfRanker('lexical', legs)).toBe(legs.lexical);
+    expect(legOfRanker('lexical-fresh', legs)).toBe(legs.lexical);
     expect(legOfRanker('embeddings', legs)).toBe(legs.semantic);
   });
 });
@@ -144,7 +144,7 @@ describe('summariseLegs — the degraded verdict', () => {
   it('degrades an otherwise-healthy leg on PARTIAL source failure, naming the source', () => {
     const partial = ran(5, {
       callsFailed: 1,
-      failures: [{ source: 'memories', ranker: 'bm25', error: 'timeout' }],
+      failures: [{ source: 'memories', ranker: 'lexical', error: 'timeout' }],
     });
     const out = summariseLegs(partial, ran(3));
     expect(out.degraded).toBe(true);
@@ -156,7 +156,7 @@ describe('summariseLegs — the degraded verdict', () => {
       callsFailed: 5,
       failures: Array.from({ length: 5 }, (_, i) => ({
         source: `s${i}`,
-        ranker: 'bm25',
+        ranker: 'lexical',
         error: 'boom',
       })),
     });

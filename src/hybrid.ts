@@ -33,7 +33,7 @@ export interface SearchContext {
   filters?: SearchFilters;
   /** Optional abort signal (e.g. a route timeout watchdog, or a client that
    *  gave up). Checked before every awaited stage — embed, each source's
-   *  bm25/vector call — so an aborted search stops STARTING work instead of
+   *  lexical/vector call — so an aborted search stops STARTING work instead of
    *  grinding every source to completion after the caller stopped listening
    *  (2026-07-09 incident: timed-out searches burned 34–69s server-side past
    *  a 30s 408). Also threaded to sources (SearchSourceParams.signal) for
@@ -140,7 +140,7 @@ export async function runFullTextSearch(
     ctx.signal?.throwIfAborted();
     lexicalLeg.attempted = true;
     try {
-      const listing = await source.bm25({
+      const listing = await source.lexical({
         sql: ctx.sql,
         query: ctx.query,
         workspaceId: ctx.workspaceId,
@@ -152,18 +152,18 @@ export async function runFullTextSearch(
       // Floor before collecting: fulltext has no fusion stage, but the floor
       // means the same thing here — reject what the ranker itself scored as
       // noise, in the ranker's own units.
-      const { list, dropped, floor } = applyMinScore(listing, 'bm25', minScore);
+      const { list, dropped, floor } = applyMinScore(listing, 'lexical', minScore);
       lexicalLeg.callsRun++;
       lexicalLeg.candidates += list.length;
       lexicalLeg.floored += dropped;
       if (dropped > 0) {
         ctx.log?.(
-          `search:fulltext ${source.name} bm25 minScore ${floor} dropped ${dropped}/${listing.length}`,
+          `search:fulltext ${source.name} lexical minScore ${floor} dropped ${dropped}/${listing.length}`,
         );
       }
       // Carry the native score as provenance too, so a caller renders the same
       // shape whether it came through fulltext or hybrid.
-      for (const item of list) hits.push({ ...item.row, rankerScores: { bm25: item.row.score } });
+      for (const item of list) hits.push({ ...item.row, rankerScores: { lexical: item.row.score } });
     } catch (err) {
       // Abort outranks graceful degradation: a cancelled search must reject,
       // not be "skipped" into a quiet partial result.
@@ -171,7 +171,7 @@ export async function runFullTextSearch(
       lexicalLeg.callsFailed++;
       lexicalLeg.failures.push({
         source: source.name,
-        ranker: 'bm25',
+        ranker: 'lexical',
         error: (err as Error).message,
       });
       ctx.log?.(`search:fulltext ${source.name} skipped: ${(err as Error).message}`);
@@ -261,7 +261,7 @@ export async function runHybridSearch(
   ctx: SearchContext & { mode: 'embeddings' | 'hybrid'; embedder: Embedder | null },
 ): Promise<HybridResult> {
   ctx.signal?.throwIfAborted();
-  // P-017: resolve the ranking policy ONCE, before any leg runs — the bm25 legs
+  // P-017: resolve the ranking policy ONCE, before any leg runs — the lexical legs
   // are floored long before the query vector settles, so this cannot wait on the
   // embed. Resolving off the embedder INSTANCE (not "was a vector produced") is
   // what makes that safe: a host keys its floor to the embedding space it
@@ -381,7 +381,7 @@ export async function runHybridSearch(
     // latency step).
     const runLeg = async (source: SearchSource, since: string | null): Promise<Listing | null> => {
       ctx.signal?.throwIfAborted();
-      const label = since ? 'bm25-fresh' : 'bm25';
+      const label = since ? 'lexical-fresh' : 'lexical';
       // P-020: EXECUTION accounting, recorded HERE rather than at the floor /
       // fusion choke points below. Those two see only candidates, so they can
       // never separate "the leg ran and found nothing" from "the leg never
@@ -391,7 +391,7 @@ export async function runHybridSearch(
       leg.attempted = true;
       try {
         const params = sourceParams(source);
-        const listing = await source.bm25(
+        const listing = await source.lexical(
           since ? { ...params, filters: { ...params.filters, since } } : params,
         );
         leg.callsRun++;
@@ -404,7 +404,7 @@ export async function runHybridSearch(
         return null;
       }
     };
-    const [bm25Lists, freshLists] = await Promise.all([
+    const [lexicalLists, freshLists] = await Promise.all([
       Promise.all(sources.map((source) => runLeg(source, null))),
       freshSinceIso
         ? Promise.all(sources.map((source) => runLeg(source, freshSinceIso)))
@@ -412,13 +412,13 @@ export async function runHybridSearch(
     ]);
     for (let i = 0; i < sources.length; i++) {
       const sourceName = sources[i]!.name;
-      const raw = bm25Lists[i];
+      const raw = lexicalLists[i];
       // Floor BOTH legs before the identity check below, so the "same ranking
       // twice" verdict is made on the lists fusion will actually see.
-      const list = raw ? floorList(raw, 'bm25', sourceName) : null;
-      if (list) recordInput('bm25', list);
+      const list = raw ? floorList(raw, 'lexical', sourceName) : null;
+      if (list) recordInput('lexical', list);
       const rawFresh = freshLists[i];
-      const fresh = rawFresh ? floorList(rawFresh, 'bm25-fresh', sourceName) : null;
+      const fresh = rawFresh ? floorList(rawFresh, 'lexical-fresh', sourceName) : null;
       // P-003: the fresh leg exists to guarantee recent rows a SEAT in the
       // candidate pool (WI-5097) — not to give them a second relevance vote.
       // rrfCombine SUMS contributions per key, so a row appearing in both legs
@@ -430,7 +430,7 @@ export async function runHybridSearch(
       // is filtered out here, leaving nothing to push.
       const alreadyPooled = new Set((list ?? []).map((entry) => entry.key));
       const freshOnly = fresh ? fresh.filter((entry) => !alreadyPooled.has(entry.key)) : null;
-      if (freshOnly && freshOnly.length > 0) recordInput('bm25-fresh', freshOnly);
+      if (freshOnly && freshOnly.length > 0) recordInput('lexical-fresh', freshOnly);
     }
   }
 

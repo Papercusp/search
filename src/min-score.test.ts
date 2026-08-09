@@ -19,30 +19,30 @@ function listing(...pairs: Array<[string, number]>): Listing {
 
 describe('resolveMinScore', () => {
   it('returns undefined with no floors at all (the opt-in default)', () => {
-    expect(resolveMinScore(undefined, 'bm25')).toBeUndefined();
-    expect(resolveMinScore({}, 'bm25')).toBeUndefined();
+    expect(resolveMinScore(undefined, 'lexical')).toBeUndefined();
+    expect(resolveMinScore({}, 'lexical')).toBeUndefined();
   });
 
   it('returns a ranker its own floor', () => {
-    expect(resolveMinScore({ bm25: 0.05, embeddings: 0.4 }, 'embeddings')).toBe(0.4);
+    expect(resolveMinScore({ lexical: 0.05, embeddings: 0.4 }, 'embeddings')).toBe(0.4);
   });
 
   it('leaves a ranker with no entry unfiltered even when others have floors', () => {
-    expect(resolveMinScore({ embeddings: 0.4 }, 'bm25')).toBeUndefined();
+    expect(resolveMinScore({ embeddings: 0.4 }, 'lexical')).toBeUndefined();
   });
 
-  it('falls back to the FAMILY floor for a hyphenated leg (bm25-fresh → bm25)', () => {
-    expect(resolveMinScore({ bm25: 0.05 }, 'bm25-fresh')).toBe(0.05);
+  it('falls back to the FAMILY floor for a hyphenated leg (lexical-fresh → lexical)', () => {
+    expect(resolveMinScore({ lexical: 0.05 }, 'lexical-fresh')).toBe(0.05);
   });
 
   it('prefers an explicit leg floor over its family', () => {
-    expect(resolveMinScore({ bm25: 0.05, 'bm25-fresh': 0.01 }, 'bm25-fresh')).toBe(0.01);
+    expect(resolveMinScore({ lexical: 0.05, 'lexical-fresh': 0.01 }, 'lexical-fresh')).toBe(0.01);
   });
 
   it('treats NaN as absent (a mis-parsed config must not silently drop everything)', () => {
     expect(resolveMinScore({ embeddings: Number.NaN }, 'embeddings')).toBeUndefined();
     // ...and it falls through to the family rather than short-circuiting.
-    expect(resolveMinScore({ bm25: 0.05, 'bm25-fresh': Number.NaN }, 'bm25-fresh')).toBe(0.05);
+    expect(resolveMinScore({ lexical: 0.05, 'lexical-fresh': Number.NaN }, 'lexical-fresh')).toBe(0.05);
   });
 
   it('honours an explicit Infinity — "drop this ranker" is a real setting', () => {
@@ -59,7 +59,7 @@ describe('applyMinScore', () => {
   const list = listing(['a', 0.9], ['b', 0.5], ['c', 0.1]);
 
   it('is a pass-through when the ranker has no floor — same object, nothing dropped', () => {
-    const out = applyMinScore(list, 'bm25', undefined);
+    const out = applyMinScore(list, 'lexical', undefined);
     expect(out.list).toBe(list);
     expect(out.dropped).toBe(0);
     expect(out.floor).toBeUndefined();
@@ -103,8 +103,8 @@ describe('applyMinScore', () => {
   });
 
   it('applies the family floor to a hyphenated leg', () => {
-    const floors: MinScoreFloors = { bm25: 0.5 };
-    expect(applyMinScore(list, 'bm25-fresh', floors).list.map((e) => e.key)).toEqual([
+    const floors: MinScoreFloors = { lexical: 0.5 };
+    expect(applyMinScore(list, 'lexical-fresh', floors).list.map((e) => e.key)).toEqual([
       'S:a',
       'S:b',
     ]);

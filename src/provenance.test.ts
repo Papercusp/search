@@ -9,8 +9,8 @@ describe('ranker family predicates', () => {
   it('reads the engine’s current lexical names AND the P-013 rename', () => {
     // If this ever regresses, EVERY lexical hit silently renders as a
     // "semantic match" — the exact inversion P-004 exists to prevent.
-    expect(isLexicalRanker('bm25')).toBe(true);
-    expect(isLexicalRanker('bm25-fresh')).toBe(true);
+    expect(isLexicalRanker('lexical')).toBe(true);
+    expect(isLexicalRanker('lexical-fresh')).toBe(true);
     expect(isLexicalRanker('lexical')).toBe(true);
     expect(isLexicalRanker('embeddings')).toBe(false);
   });
@@ -18,7 +18,7 @@ describe('ranker family predicates', () => {
   it('reads the vector names', () => {
     expect(isSemanticRanker('embeddings')).toBe(true);
     expect(isSemanticRanker('semantic')).toBe(true);
-    expect(isSemanticRanker('bm25')).toBe(false);
+    expect(isSemanticRanker('lexical')).toBe(false);
   });
 });
 
@@ -31,34 +31,34 @@ describe('hitProvenance', () => {
   });
 
   it('classifies a term-only hit as lexical and carries ts_rank_cd', () => {
-    expect(hitProvenance(hit(['bm25'], { bm25: 0.0731 }))).toEqual({
+    expect(hitProvenance(hit(['lexical'], { lexical: 0.0731 }))).toEqual({
       matchedBy: 'lexical',
       lexicalScore: 0.0731,
     });
   });
 
   it('classifies a hit both legs returned as both, with both native scores', () => {
-    expect(hitProvenance(hit(['bm25', 'embeddings'], { bm25: 0.0731, embeddings: 0.6142 }))).toEqual({
+    expect(hitProvenance(hit(['lexical', 'embeddings'], { lexical: 0.0731, embeddings: 0.6142 }))).toEqual({
       matchedBy: 'both',
       lexicalScore: 0.0731,
       semanticScore: 0.6142,
     });
   });
 
-  it('takes the BEST score across sibling lexical legs (bm25 + bm25-fresh)', () => {
+  it('takes the BEST score across sibling lexical legs (lexical + lexical-fresh)', () => {
     // Both legs are ts_rank_cd over the same row, so the stronger one is the
     // row's lexical strength — not the last one iterated.
     expect(
-      hitProvenance(hit(['bm25', 'bm25-fresh'], { bm25: 0.02, 'bm25-fresh': 0.09 })),
+      hitProvenance(hit(['lexical', 'lexical-fresh'], { lexical: 0.02, 'lexical-fresh': 0.09 })),
     ).toEqual({ matchedBy: 'lexical', lexicalScore: 0.09 });
     expect(
-      hitProvenance(hit(['bm25', 'bm25-fresh'], { bm25: 0.09, 'bm25-fresh': 0.02 })),
+      hitProvenance(hit(['lexical', 'lexical-fresh'], { lexical: 0.09, 'lexical-fresh': 0.02 })),
     ).toEqual({ matchedBy: 'lexical', lexicalScore: 0.09 });
   });
 
   it('reads the UNION of rankers and rankerScores — either alone can be absent', () => {
     // runFullTextSearch sets rankerScores but the row may carry no `rankers`.
-    expect(hitProvenance({ rankerScores: { bm25: 0.05 } } as never)).toEqual({
+    expect(hitProvenance({ rankerScores: { lexical: 0.05 } } as never)).toEqual({
       matchedBy: 'lexical',
       lexicalScore: 0.05,
     });
@@ -74,7 +74,7 @@ describe('hitProvenance', () => {
   it('omits a score key entirely rather than emitting undefined', () => {
     // The value crosses a JSON boundary; `semanticScore: undefined` and an
     // absent key serialise the same, but the type must not claim a number.
-    const p = hitProvenance(hit(['bm25'], { bm25: 0.1 }));
+    const p = hitProvenance(hit(['lexical'], { lexical: 0.1 }));
     expect('semanticScore' in p).toBe(false);
   });
 });
@@ -82,8 +82,8 @@ describe('hitProvenance', () => {
 describe('isVectorOnly', () => {
   it('is true only for a hit no lexical leg returned', () => {
     expect(isVectorOnly(hit(['embeddings'], { embeddings: 0.7 }))).toBe(true);
-    expect(isVectorOnly(hit(['bm25', 'embeddings'], { bm25: 0.05, embeddings: 0.7 }))).toBe(false);
-    expect(isVectorOnly(hit(['bm25'], { bm25: 0.05 }))).toBe(false);
+    expect(isVectorOnly(hit(['lexical', 'embeddings'], { lexical: 0.05, embeddings: 0.7 }))).toBe(false);
+    expect(isVectorOnly(hit(['lexical'], { lexical: 0.05 }))).toBe(false);
   });
 
   it('is FALSE for unknown — absent attribution is not evidence of a vector match', () => {

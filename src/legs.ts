@@ -58,7 +58,7 @@ export type LegStatus = 'ran' | 'errored' | 'not-run';
 export interface LegFailure {
   /** The `SearchSource.name` whose query failed. */
   source: string;
-  /** The ranker label under which it was called (e.g. `bm25`, `bm25-fresh`). */
+  /** The ranker label under which it was called (e.g. `lexical`, `lexical-fresh`). */
   ranker: string;
   /** The error's message. */
   error: string;
@@ -78,7 +78,7 @@ export interface LegReport {
    *  why this is reported separately from `candidates`. */
   floored: number;
   /** Source-leg calls that returned. A source can be called more than once in
-   *  one leg (the recency `bm25-fresh` window), so this counts CALLS, not
+   *  one leg (the recency `lexical-fresh` window), so this counts CALLS, not
    *  distinct sources. */
   callsRun: number;
   /** Source-leg calls that threw. */
@@ -146,8 +146,11 @@ export function newLegAccumulator(): LegAccumulator {
 
 /**
  * Route a ranker label to the leg it belongs to. Reuses `provenance.ts`'s
- * predicate so the `bm25` → `lexical` rename (P-013) cannot silently
- * mis-attribute a leg's candidates here while provenance keeps working.
+ * predicate rather than matching the label here, so leg attribution and
+ * provenance can never disagree about what counts as lexical. That shared
+ * predicate is what let the `bm25` → `lexical` rename (P-013, landed) happen
+ * without silently mis-attributing every lexical candidate to the semantic
+ * leg — and it still absorbs a host that names its own lexical source `bm25`.
  */
 export function legOfRanker(
   ranker: string,

@@ -28,7 +28,7 @@ export interface SearchHit {
   rankers: string[];
   /**
    * PRE-FUSION per-ranker native scores, keyed by ranker name — e.g.
-   * `{ bm25: 0.0731, embeddings: 0.6142 }`. Populated by the engine so a
+   * `{ lexical: 0.0731, embeddings: 0.6142 }`. Populated by the engine so a
    * caller can render match PROVENANCE ("semantic match, cosine 0.61")
    * instead of guessing from `score`, which after fusion is an RRF value
    * (≈0.016 per rank-1 contribution) in nobody's units and comparable only
@@ -143,13 +143,13 @@ export interface SearchSource {
   /** Source/ranker label, e.g. `escalations`. */
   name: string;
   /** BM25 (tsvector `ts_rank_cd`) ranked list for this source. */
-  bm25(p: SearchSourceParams): Promise<Listing>;
+  lexical(p: SearchSourceParams): Promise<Listing>;
   /** Optional pgvector cosine-similarity ranked list (`<=>`) for this source. */
   embedding?(p: SearchSourceParams & { qVec: string }): Promise<Listing>;
   /** WI-4734 highlight-deferral (opt-in): given the FINAL fused top-N hit ids
    *  for this source, return `source_id → highlight` in ONE batched query.
    *  Implementing this lets the engine pass `wantHighlight: false` to
-   *  `bm25`/`embedding` under `SearchContext.deferHighlight`, so the expensive
+   *  `lexical`/`embedding` under `SearchContext.deferHighlight`, so the expensive
    *  highlight expression runs for the displayed rows only. Best-effort: a
    *  throw degrades to empty highlights for this source, never fails the
    *  search. */

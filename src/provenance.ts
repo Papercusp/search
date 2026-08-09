@@ -30,11 +30,12 @@
  * a caller that wants "is the text on screen actually the match" has to test
  * the rendered string for <mark> separately.
  *
- * Deliberately tolerant of ranker RENAMES: the lexical leg is registered as
- * `bm25` today (plus `bm25-fresh`, the recency-window candidate leg) and
- * P-013 of the same plan renames the public surface to `lexical`. Both read
- * as lexical here, so that rename cannot silently flip every card to
- * "semantic match".
+ * Deliberately tolerant of ranker RENAMES: the engine's lexical leg is
+ * registered as `lexical` (plus `lexical-fresh`, the recency-window candidate
+ * leg) since P-013 renamed it from `bm25`/`bm25-fresh`. BOTH spellings still
+ * read as lexical here — see `isLexicalRanker` for why that is not a
+ * deprecation alias — so neither the rename nor a host's own naming can
+ * silently flip every card to "semantic match".
  *
  * Pure — no PG, no host types, unit-tested standalone.
  */
@@ -54,11 +55,22 @@ export interface HitProvenance {
   semanticScore?: number;
 }
 
-/** Ranker labels that mean "term/lexical match". `bm25` is the engine's
- *  current name, `bm25-fresh` its recency-window candidate leg, `lexical` the
- *  P-013 rename. Prefix-matched so a future `bm25-*` variant stays lexical. */
+/** Ranker labels that mean "term/lexical match". `lexical` is the engine's
+ *  current name and `lexical-fresh` its recency-window candidate leg; `bm25`
+ *  is the pre-P-013 spelling. Prefix-matched so a `<family>-*` variant stays
+ *  lexical without a code change here.
+ *
+ *  RETAINING `bm25` IS NOT A DEPRECATION ALIAS, which the repo otherwise bans
+ *  in alpha. This is a CLASSIFIER over labels this library does not control:
+ *  `SearchSource.name` and the ranker label are supplied by the HOST, and
+ *  @papercusp/search is published standalone, so a host that legitimately
+ *  names its own lexical source `bm25` must not be silently classified
+ *  `semantic`. The failure mode is the reason the tolerance exists: a wrong
+ *  answer with no error, on the provenance line a user reads to decide whether
+ *  a result is a real term match. There is no write path here to keep
+ *  bilingual — the engine emits `lexical` only. */
 export function isLexicalRanker(ranker: string): boolean {
-  return ranker.startsWith('bm25') || ranker.startsWith('lexical');
+  return ranker.startsWith('lexical') || ranker.startsWith('bm25');
 }
 
 /** Ranker labels that mean "vector/semantic match". */

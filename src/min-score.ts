@@ -34,20 +34,20 @@ import type { Listing } from './types';
  * Per-ranker floors, keyed by the ranker name the engine fuses under.
  *
  * Well-known engine ranker names:
- *   - `bm25`        — the lexical (`ts_rank_cd`) leg
- *   - `bm25-fresh`  — the fresh-window lexical leg (same units as `bm25`)
+ *   - `lexical`        — the lexical (`ts_rank_cd`) leg
+ *   - `lexical-fresh`  — the fresh-window lexical leg (same units as `lexical`)
  *   - `embeddings`  — the pgvector cosine-similarity leg
  *
  * A ranker with no entry is UNFILTERED. Family fallback: a hyphenated ranker
- * name inherits its family's floor (`bm25-fresh` → `bm25`) unless it sets its
+ * name inherits its family's floor (`lexical-fresh` → `lexical`) unless it sets its
  * own, so a host does not have to enumerate every leg variant the engine may
  * grow. An explicit entry always wins over the family fallback — including an
  * explicit `Infinity`/`-Infinity`, which are legitimate "drop everything" /
  * "keep everything" settings.
  */
 export interface MinScoreFloors {
-  /** Floor for the lexical `ts_rank_cd` legs (inherited by `bm25-fresh`). */
-  bm25?: number;
+  /** Floor for the lexical `ts_rank_cd` legs (inherited by `lexical-fresh`). */
+  lexical?: number;
   /** Floor for the pgvector cosine-similarity leg. */
   embeddings?: number;
   /** Any other ranker name the host's engine fuses under. */
