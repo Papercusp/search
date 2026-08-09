@@ -99,6 +99,36 @@ export interface SearchContext {
    *  Threaded through unchanged; absent ⇒ each source keeps its own default. */
   lexicalAnchorDfBudget?: number;
   /**
+   * Two-stage lexical retrieval. **Default ON**; pass `false` to opt out.
+   *
+   * WHY IT DEFAULTS ON, against the usual "new behaviour ships opt-in" reflex:
+   * every ranking feature before it landed as an optional per-call field that
+   * had to be hand-propagated, and hand-propagation never happened — that is
+   * the measured origin of eight surfaces running with no embedding floor and
+   * six discarding the leg report. An opt-in cascade would reach exactly the
+   * one caller that already has one.
+   *
+   * WHAT IT DOES. Stage 1 is the historical AND query, unchanged. If it
+   * under-fills the requested limit, stage 2 re-queries the same source in
+   * `coverage-graded` mode and APPENDS only rows stage 1 did not return.
+   *
+   * WHY IT IS SAFE HERE WHERE THE CALLER-LEVEL VERSION WAS NOT. WI-8579
+   * measured a single-query swap losing 180 admitted lines across 79 of 120
+   * live turns — a SWAP, not an addition, because the caller's cap and char
+   * budget were applied over a REORDERED walk. Here stage 1's rows keep both
+   * their identity and their order, and stage 2 can only occupy slots stage 1
+   * left empty, so the listing returned is a strict superset of today's. In
+   * hybrid mode RRF fuses on list POSITION, so appended rows also rank strictly
+   * below every stage-1 row: the widening cannot demote an existing hit.
+   *
+   * IT DOES NOT FIRE WHEN THE CALLER SET `lexicalMode`. An explicit mode means
+   * the caller is driving the leg itself — the corpus-injection leg runs its
+   * own two-stage cascade with a separately-derived stage-2 query and a hard
+   * latency budget, and silently cascading inside its stage 1 would both double
+   * its query count and change a measured design out from under it.
+   */
+  lexicalCascade?: boolean;
+  /**
    * PER-RANKER minimum-score floors, applied to each ranker's list BEFORE
    * fusion (see {@link MinScoreFloors}).
    *
