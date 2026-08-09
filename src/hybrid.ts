@@ -334,8 +334,10 @@ export async function runHybridSearch(
     }
     return kept;
   };
-  /** Record a floored list's native scores, then enqueue it as an RRF input. */
-  const recordInput = (ranker: string, list: Listing): void => {
+  /** Record a floored list's native scores, then enqueue it as an RRF input.
+   *  `rankOffset` marks a list that CONTINUES another ranking rather than
+   *  standing on its own — see {@link rrfCombine}'s `rankOffset`. */
+  const recordInput = (ranker: string, list: Listing, rankOffset?: number): void => {
     // Counted here rather than at the query: this is the post-floor,
     // post-dedupe list fusion genuinely sees, which is the only number that
     // distinguishes "the leg ran" from "the leg contributed".
@@ -350,7 +352,7 @@ export async function runHybridSearch(
         nativeByKey.set(entry.key, { [ranker]: entry.score });
       }
     }
-    inputs.push({ name: ranker, list });
+    inputs.push({ name: ranker, list, ...(rankOffset ? { rankOffset } : {}) });
   };
   const sourceParams = (source: SearchSource): SearchSourceParams => ({
     sql: ctx.sql,
@@ -453,7 +455,28 @@ export async function runHybridSearch(
       // is filtered out here, leaving nothing to push.
       const alreadyPooled = new Set((list ?? []).map((entry) => entry.key));
       const freshOnly = fresh ? fresh.filter((entry) => !alreadyPooled.has(entry.key)) : null;
-      if (freshOnly && freshOnly.length > 0) recordInput('lexical-fresh', freshOnly);
+      // The dedupe above removed the DOUBLE-COUNT; this removes the remaining
+      // RANK-SCALE MISMATCH, which is the larger of the two effects (measured
+      // 2026-08-09, D-044: the fresh leg cost the owner-reported `theory` query
+      // 2 of its 3 recoverable ground-truth sessions).
+      //
+      // What survives the dedupe is, BY CONSTRUCTION, exactly the rows the
+      // relevance-only cut MISSED — i.e. rows the main leg already beat. Fused
+      // as an independent input they are re-indexed from 0 against nothing but
+      // each other, so the best of them collects 1/(k+1): the identical
+      // contribution the single best row in the whole corpus receives. A weak
+      // row re-ranked in an empty pool outranks strong rows it genuinely lost
+      // to.
+      //
+      // Offsetting by the main list's length continues that ranking instead of
+      // restarting it, which is where these rows actually stand. They keep
+      // their SEAT in the pool (WI-5097's purpose, and the recency re-rank can
+      // still lift them on merit) and keep their `lexical-fresh` provenance
+      // label, which hitProvenance and corpus-recall's agreement measure both
+      // read.
+      if (freshOnly && freshOnly.length > 0) {
+        recordInput('lexical-fresh', freshOnly, list?.length ?? 0);
+      }
     }
   }
 
