@@ -172,6 +172,46 @@ export interface SearchResult {
   legs: SearchLegs;
 }
 
+/**
+ * Run ONE source's lexical leg, widening to a second stage when the first
+ * under-fills. See {@link SearchContext.lexicalCascade} for why this defaults
+ * on and why it is append-only.
+ *
+ * Keyed on `source_id` alone, deliberately: this runs against a SINGLE source,
+ * so `source` is constant across both stages and adding it to the key would
+ * only invite a delimiter (and a delimiter in a composite key is how a NUL
+ * byte ends up in a source file).
+ *
+ * Returns the listing plus how many rows stage 2 contributed, so a caller can
+ * report the widening instead of having it happen invisibly.
+ */
+async function lexicalWithCascade(
+  source: SearchSource,
+  params: SearchSourceParams,
+  opts: { enabled: boolean; callerSetMode: boolean },
+): Promise<{ listing: Listing; stage2Added: number }> {
+  const stage1 = await source.lexical(params);
+  // Under-fill is the trigger, and `>=` is deliberate: a leg that already
+  // filled its limit has nothing to gain and would only pay a second query.
+  if (!opts.enabled || opts.callerSetMode || stage1.length >= params.limit) {
+    return { listing: stage1, stage2Added: 0 };
+  }
+  params.signal?.throwIfAborted();
+  const graded = await source.lexical({ ...params, lexicalMode: 'coverage-graded' });
+  const seen = new Set(stage1.map((item) => item.row.source_id));
+  const room = params.limit - stage1.length;
+  const extra: Listing = [];
+  for (const item of graded) {
+    if (extra.length >= room) break;
+    if (seen.has(item.row.source_id)) continue;
+    extra.push(item);
+  }
+  // Stage 1 FIRST and unmodified. This ordering IS the superset guarantee, not
+  // a cosmetic choice — reversing it reproduces the reordered walk that cost
+  // WI-8579 180 admitted lines.
+  return { listing: [...stage1, ...extra], stage2Added: extra.length };
+}
+
 /** BM25-only full-text search across the given sources (search:fulltext). */
 export async function runFullTextSearch(
   sources: SearchSource[],
@@ -193,15 +233,29 @@ export async function runFullTextSearch(
     ctx.signal?.throwIfAborted();
     lexicalLeg.attempted = true;
     try {
-      const listing = await source.lexical({
-        sql: ctx.sql,
-        query: ctx.query,
-        workspaceId: ctx.workspaceId,
-        scopeFilter: ctx.scopeFilter,
-        limit: ctx.limit,
-        filters: ctx.filters,
-        signal: ctx.signal,
-      });
+      // The cascade matters MOST here. A HYBRID search whose AND query returns
+      // nothing still has a vector leg, so it merely "degrades to
+      // embeddings-only"; fulltext is lexical BY CONTRACT, so the identical
+      // empty AND query returns an EMPTY PAGE. Measured on the live corpus, the
+      // AND leg returns zero rows for 30% of 1-2 term, 50% of 3-14 term and 70%
+      // of 15+ term REAL queries (D-056).
+      const { listing } = await lexicalWithCascade(
+        source,
+        {
+          sql: ctx.sql,
+          query: ctx.query,
+          workspaceId: ctx.workspaceId,
+          scopeFilter: ctx.scopeFilter,
+          limit: ctx.limit,
+          filters: ctx.filters,
+          signal: ctx.signal,
+          ...(ctx.lexicalMode && ctx.lexicalMode !== 'and' ? { lexicalMode: ctx.lexicalMode } : {}),
+          ...(ctx.lexicalAnchorDfBudget === undefined
+            ? {}
+            : { lexicalAnchorDfBudget: ctx.lexicalAnchorDfBudget }),
+        },
+        { enabled: ctx.lexicalCascade !== false, callerSetMode: ctx.lexicalMode !== undefined },
+      );
       // Floor before collecting: fulltext has no fusion stage, but the floor
       // means the same thing here — reject what the ranker itself scored as
       // noise, in the ranker's own units.
@@ -446,9 +500,25 @@ export async function runHybridSearch(
       leg.attempted = true;
       try {
         const params = sourceParams(source);
-        const listing = await source.lexical(
-          since ? { ...params, filters: { ...params.filters, since } } : params,
-        );
+        // Cascade the MAIN lexical leg only, never `lexical-fresh`. The fresh
+        // leg is a window-restricted supplementary RRF input, so under-filling
+        // is its NORMAL state — the window is genuinely small — rather than the
+        // signal of AND-semantics elimination that the trigger is meant to
+        // detect. Cascading it would fire on nearly every search and buy a
+        // second query per source for rows the main leg's own cascade already
+        // reaches.
+        if (since) {
+          const listing = await source.lexical({
+            ...params,
+            filters: { ...params.filters, since },
+          });
+          leg.callsRun++;
+          return listing;
+        }
+        const { listing } = await lexicalWithCascade(source, params, {
+          enabled: ctx.lexicalCascade !== false,
+          callerSetMode: ctx.lexicalMode !== undefined,
+        });
         leg.callsRun++;
         return listing;
       } catch (err) {
