@@ -605,6 +605,54 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
     expect(lexical('rescued')).toEqual(['lexical-fresh']);
   });
 
+  // D-068: the fresh leg grants REPRESENTATION, not domination. Its admission
+  // was unbounded — it is called with the same candidateLimit as the main leg,
+  // so a DENSE window could take the entire page. That is the owner-reported
+  // `theory` failure (recall 0.000): every slot held by in-window rows while
+  // the best relevance matches were evicted outright.
+  //
+  // This is the SECOND half of WI-5097's contract and the two are easy to
+  // conflate: the test above proves a recent row GETS a seat (sparse window,
+  // n=1); this one proves recent rows cannot take EVERY seat (dense window).
+  // A fix that satisfies one and breaks the other has been shipped twice
+  // (D-045, reverted; see the DO-NOT-RE-ADD block in hybrid.ts) — so assert
+  // both, never either alone.
+  it('D-068: a DENSE fresh window cannot evict the best relevance match (admission is bounded)', async () => {
+    const LIMIT = 10; // candidateLimit = 30
+    // 30 old rows fill the relevance cut exactly, so no fresh row can reach the
+    // pool except via the fresh leg — the construction that actually exercises
+    // it. (With a small corpus the main leg already holds the fresh rows,
+    // `freshOnly` is empty, and the leg under test never runs at all.)
+    const dense = [
+      { id: 'gt', ts: NOW - 7 * 24 * H, score: 1000 },
+      ...Array.from({ length: 29 }, (_, i) => ({
+        id: `old-${i}`, ts: NOW - 8 * 24 * H, score: 900 - i,
+      })),
+      ...Array.from({ length: 40 }, (_, i) => ({
+        id: `fresh-${i}`, ts: NOW - 1 * H, score: 1,
+      })),
+    ];
+    const src = timedSource('A', dense);
+    const res = await runHybridSearch([src], {
+      ...baseCtx, limit: LIMIT, mode: 'hybrid', embedder: null,
+      // production-shaped recency (adv-session-search defaults)
+      recency: { halfLifeMs: 168 * H, weight: 0.5, freshWindowMs: 48 * H, now: NOW },
+    });
+    const ids = res.results.map((h) => h.source_id);
+
+    // The mechanism must actually be EXERCISED — 40 in-window rows, none of
+    // which the relevance cut admitted. Without this the assertions below pass
+    // vacuously on a fresh leg that contributed nothing.
+    expect(legCalls(src.lexical).length).toBeGreaterThan(1);
+
+    // The best relevance match survives. Unbounded admission evicted it.
+    expect(ids).toContain('gt');
+    // ...and the fresh leg took at most HALF the page, never all of it.
+    expect(ids.filter((i) => i.startsWith('fresh-')).length).toBeLessThanOrEqual(
+      Math.floor(LIMIT / 2),
+    );
+  });
+
   it('runs no fresh leg when recency is absent, weight is 0, or the window is 0', async () => {
     for (const rec of [undefined, { ...recency, weight: 0 }, { ...recency, freshWindowMs: 0 }]) {
       const src = timedSource('A', corpus);

@@ -584,15 +584,45 @@ export async function runHybridSearch(
       //   is then unwinnable — which is precisely the bug WI-5097 fixed and
       //   D-004 says must never be re-opened.
       //
-      // So the two constraints are in genuine tension and the resolution is a
-      // TUNING question, not a sign flip: the offset must be large enough to
-      // deny a fresh-only row the corpus-best contribution, yet small enough to
-      // leave it above last place so decay can still lift it. That point must
-      // be measured against BOTH guards — this test file AND the P-015 owner
-      // eval — never against either alone. Tracked on plan
-      // semantic-search-fingerprint-coverage-2026-08-03.
+      // So the two constraints are in genuine tension ON THE OFFSET AXIS, and
+      // there the resolution is a TUNING question, not a sign flip: the offset
+      // must be large enough to deny a fresh-only row the corpus-best
+      // contribution, yet small enough to leave it above last place so decay
+      // can still lift it.
+      //
+      // D-068: they are NOT in tension on the CARDINALITY axis, which is where
+      // the live defect actually sits. The offset governs WHERE an admitted row
+      // lands; nothing governed HOW MANY were admitted. The fresh leg is called
+      // with the same `candidateLimit` as the main leg, so a dense window could
+      // admit up to the entire pool — and then "a seat" is the whole room.
+      //
+      // Measured against the real engine at Report 1's scale (k=30, 8
+      // ground-truth rows 7d old, 90 rows inside the 48h window):
+      //
+      //   fresh-admission cap   ground truth in top-30   fresh in top-30
+      //   unbounded (old)       0/8   (recall 0.000)     30
+      //   limit                 0/8   (recall 0.000)     30
+      //   floor(limit/2)        8/8   (recall 1.000)     15
+      //   floor(limit/4)        8/8   (recall 1.000)      7
+      //   fresh leg OFF         8/8                       —
+      //
+      // The unbounded row reproduces the owner-reported `theory` failure
+      // exactly (recall 0.000, every slot taken by in-window rows). Capping at
+      // `limit` is NOT enough — the cliff is at floor(limit/2), which is also
+      // the largest cap that fully recovers. WI-5097's guarantee is about
+      // REPRESENTATION, not domination, and its own fixture has exactly ONE row
+      // in the window, so every cap >= 1 preserves it by construction.
+      //
+      // ⚠ Bound AFTER the dedupe, never on the fresh query's limit: admit the
+      // top-N rows the relevance cut actually MISSED, not the top-N recent rows
+      // (most of which the main leg may already hold).
+      //
+      // ⚠ Any change here must be measured against BOTH guards — this test file
+      // AND the P-015 owner eval — never either alone. D-045 improved the eval
+      // (0/8 → 2/8) and was still reverted for breaking WI-5097 here.
+      const freshSeats = Math.max(1, Math.floor(ctx.limit / 2));
       if (freshOnly && freshOnly.length > 0) {
-        recordInput('lexical-fresh', freshOnly);
+        recordInput('lexical-fresh', freshOnly.slice(0, freshSeats));
       }
     }
   }
