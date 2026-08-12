@@ -620,7 +620,7 @@ export async function runHybridSearch(
       // ⚠ Any change here must be measured against BOTH guards — this test file
       // AND the P-015 owner eval — never either alone. D-045 improved the eval
       // (0/8 → 2/8) and was still reverted for breaking WI-5097 here.
-      const freshSeats = Math.max(1, Math.floor(ctx.limit / 2));
+      const freshSeats = Math.max(1, Math.floor(ctx.limit / 3));
       if (freshOnly && freshOnly.length > 0) {
         // The fresh leg grants bounded admission, not a second relevance vote.
         // Starting the admitted rows at rank zero is intentional: they are
