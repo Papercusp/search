@@ -608,10 +608,11 @@ export async function runHybridSearch(
       //
       // The unbounded row reproduces the owner-reported `theory` failure
       // exactly (recall 0.000, every slot taken by in-window rows). Capping at
-      // `limit` is NOT enough — the cliff is at floor(limit/2), which is also
-      // the largest cap that fully recovers. WI-5097's guarantee is about
-      // REPRESENTATION, not domination, and its own fixture has exactly ONE row
-      // in the window, so every cap >= 1 preserves it by construction.
+      // `limit` is NOT enough — the measured cliff is at floor(limit/2), which
+      // is the largest cap that fully recovers this corpus. WI-5097's guarantee
+      // is about REPRESENTATION, not domination, and its own fixture has
+      // exactly ONE row in the window, so every cap >= 1 preserves it by
+      // construction.
       //
       // ⚠ Bound AFTER the dedupe, never on the fresh query's limit: admit the
       // top-N rows the relevance cut actually MISSED, not the top-N recent rows
@@ -620,7 +621,10 @@ export async function runHybridSearch(
       // ⚠ Any change here must be measured against BOTH guards — this test file
       // AND the P-015 owner eval — never either alone. D-045 improved the eval
       // (0/8 → 2/8) and was still reverted for breaking WI-5097 here.
-      const freshSeats = Math.max(1, Math.floor(ctx.limit / 3));
+      // The live P-015 trials at limit/3 and limit/4 both met the 2/8 floor;
+      // limit/4 had better graded precision and nDCG, so keep the quarter-page
+      // cap as the conservative production choice.
+      const freshSeats = Math.max(1, Math.floor(ctx.limit / 4));
       if (freshOnly && freshOnly.length > 0) {
         // The fresh leg grants bounded admission, not a second relevance vote.
         // Starting the admitted rows at rank zero is intentional: they are

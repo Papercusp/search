@@ -606,10 +606,11 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
   });
 
   // D-068: the fresh leg grants REPRESENTATION, not domination. Its admission
-  // was unbounded — it is called with the same candidateLimit as the main leg,
-  // so a DENSE window could take the entire page. That is the owner-reported
-  // `theory` failure (recall 0.000): every slot held by in-window rows while
-  // the best relevance matches were evicted outright.
+  // was historically unbounded — it is called with the same candidateLimit as
+  // the main leg, so a DENSE window could take the entire page. That is the
+  // owner-reported `theory` failure (recall 0.000): every slot held by in-window
+  // rows while the best relevance matches were evicted outright. The production
+  // cap is now the conservative quarter-page bound.
   //
   // This is the SECOND half of WI-5097's contract and the two are easy to
   // conflate: the test above proves a recent row GETS a seat (sparse window,
@@ -647,9 +648,9 @@ describe('WI-5097 — fresh-candidate leg (recency.freshWindowMs)', () => {
 
     // The best relevance match survives. Unbounded admission evicted it.
     expect(ids).toContain('gt');
-    // ...and the fresh leg took at most HALF the page, never all of it.
+    // ...and the fresh leg took at most a QUARTER of the page, never all of it.
     expect(ids.filter((i) => i.startsWith('fresh-')).length).toBeLessThanOrEqual(
-      Math.floor(LIMIT / 2),
+      Math.max(1, Math.floor(LIMIT / 4)),
     );
   });
 
