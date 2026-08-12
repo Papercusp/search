@@ -622,7 +622,15 @@ export async function runHybridSearch(
       // (0/8 → 2/8) and was still reverted for breaking WI-5097 here.
       const freshSeats = Math.max(1, Math.floor(ctx.limit / 2));
       if (freshOnly && freshOnly.length > 0) {
-        recordInput('lexical-fresh', freshOnly.slice(0, freshSeats));
+        // The fresh query is a continuation of the main lexical ranking, not
+        // an independent ranking over a narrower population.  Starting its
+        // RRF rank at zero lets a row that merely won the fresh-window cut
+        // impersonate the corpus-best lexical hit.  A full main-list offset
+        // makes a sparse rescue impossible under the linear recency blend;
+        // the one-third offset keeps the rescue eligible while denying the
+        // fresh leg the rank-0 contribution that caused the live recall loss.
+        const freshRankOffset = Math.floor(((list?.length ?? 0) * 2) / 3);
+        recordInput('lexical-fresh', freshOnly.slice(0, freshSeats), freshRankOffset);
       }
     }
   }
