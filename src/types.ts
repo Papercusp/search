@@ -39,6 +39,23 @@ export interface SearchHit {
    * assume a key is present.
    */
   rankerScores?: Record<string, number>;
+  /**
+   * POST-RETRIEVAL cross-encoder relevance score, attached by a Stage B rerank
+   * (papercusp's `rerankProseHits`). Set by that stage, never by the engine.
+   *
+   * This is the only per-hit number that is a true query↔document relevance
+   * MAGNITUDE, and therefore the only one a relevance THRESHOLD can be
+   * expressed in: `score` is rank-derived after fusion, so flooring on it is a
+   * rank cutoff that `limit` already performs, and `rankerScores` are
+   * per-ranker and absent for rankers that did not return the hit.
+   *
+   * ABSENT — never 0 — for a hit the cross-encoder did not score, including
+   * every hit of a call that degraded to retrieval order. Absence means "not
+   * judged", so treat it as unknown rather than as a low score; the rerank
+   * stage reports 0 for unscored rows internally, and collapsing that into this
+   * field would make a degraded run look uniformly irrelevant.
+   */
+  rerankScore?: number;
 }
 
 /** A single source's ranked list, keyed for RRF fusion. */
