@@ -17,7 +17,8 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "@papercusp/rrf": "*"
+    "@papercusp/rrf": "*",
+    "@papercusp/module-singleton": "*"
   },
   "devDependencies": {
     "postgres": "^3.4.5",
