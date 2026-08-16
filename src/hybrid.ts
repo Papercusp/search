@@ -22,6 +22,7 @@ import {
   summariseLegs,
   type SearchLegs,
 } from './legs';
+import { observeLegs } from './leg-health';
 
 export interface SearchContext {
   sql: PgHandle;

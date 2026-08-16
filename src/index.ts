@@ -58,6 +58,16 @@ export {
   type LegAccumulator,
 } from './legs';
 export {
+  observeLegs,
+  readLegHealth,
+  legHealthObservedCount,
+  resetLegHealth,
+  summariseLegSamples,
+  sampleOfLegs,
+  LEG_HEALTH_CAPACITY,
+  type LegHealthWindow,
+} from './leg-health';
+export {
   configureSearchDefaults,
   resetSearchDefaults,
   searchDefaultsHost,
