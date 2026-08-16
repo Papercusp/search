@@ -291,7 +291,11 @@ export async function runFullTextSearch(
     results: hits.slice(0, ctx.limit),
     totalHits: hits.length,
     applied,
-    legs: summariseLegs(finaliseLeg(lexicalLeg), finaliseLeg(semanticLeg)),
+    // observeLegs records the verdict into the trailing-window health counter and
+    // returns it unchanged (P-002). Without it the degradation verdict exists only
+    // as prose in this one reply and nothing can answer "how often is retrieval
+    // running at half strength?".
+    legs: observeLegs(summariseLegs(finaliseLeg(lexicalLeg), finaliseLeg(semanticLeg))),
   };
 }
 
@@ -749,6 +753,6 @@ export async function runHybridSearch(
     ...(ctx.groupBy ? { totalGroups: countGroups(fused, ctx.groupBy) } : {}),
     embedderAvailable: !!queryVec,
     applied,
-    legs: summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic)),
+    legs: observeLegs(summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic))),
   };
 }
