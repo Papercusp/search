@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RankedItem } from '@papercusp/rrf';
+
+import { runFullTextSearch, runHybridSearch, type SearchContext } from './hybrid';
+import type { Embedder, Listing, PgHandle, SearchHit, SearchSource } from './types';
 
 import {
   LEG_HEALTH_CAPACITY,
@@ -208,6 +212,73 @@ describe('observeLegs / readLegHealth', () => {
     expect(rendered[0]).toContain('semantic leg blocked');
     // ...but nothing accumulated it, so no rate is derivable from it.
     expect(readLegHealth({ windowMs: 60_000, nowMs: NOW }).searches).toBe(0);
+  });
+
+  // ── THE WIRING PROOF ──────────────────────────────────────────────────────
+  // Everything above tests the AGGREGATOR. None of it proves the aggregator is
+  // actually ON the search path — and a metric that silently never records is
+  // strictly worse than no metric, because a permanent zero reads as health.
+  // These drive the REAL engine entrypoints and assert the counter moved.
+  describe('is wired into the real search path', () => {
+    const sql = {} as PgHandle;
+    const baseCtx: SearchContext = {
+      sql,
+      query: 'q',
+      workspaceId: 'w',
+      scopeFilter: null,
+      limit: 5,
+    };
+    const h = (source: string, id: string, score: number): SearchHit => ({
+      source,
+      source_id: id,
+      excerpt: `ex-${id}`,
+      highlight: `hl-${id}`,
+      score,
+      rankers: [source],
+    });
+    const listing = (...hits: SearchHit[]): Listing =>
+      hits.map((x): RankedItem<SearchHit> => ({
+        key: `${x.source}:${x.source_id}`,
+        score: x.score,
+        row: x,
+      }));
+    const source = (name: string, withEmbedding = false): SearchSource => {
+      const s: SearchSource = { name, lexical: vi.fn(async () => listing(h(name, '1', 0.9))) };
+      if (withEmbedding) s.embedding = vi.fn(async () => listing(h(name, '2', 0.8)));
+      return s;
+    };
+    const embedder: Embedder = vi.fn(async () => [0.1, 0.2, 0.3]) as unknown as Embedder;
+
+    it('runFullTextSearch records a sample', async () => {
+      expect(legHealthObservedCount()).toBe(0);
+      await runFullTextSearch([source('a')], baseCtx);
+      expect(legHealthObservedCount()).toBe(1);
+    });
+
+    it('runHybridSearch records a sample', async () => {
+      expect(legHealthObservedCount()).toBe(0);
+      await runHybridSearch([source('a', true)], { ...baseCtx, mode: 'hybrid', embedder });
+      expect(legHealthObservedCount()).toBe(1);
+    });
+
+    it('records the DEGRADED verdict when the embedder dies mid-search', async () => {
+      // The live 2026-08-16 signature: the query embedder blows its budget, the
+      // semantic leg never runs, and the search silently returns lexical-only.
+      const throwing = vi.fn(async () => {
+        throw new Error('query embed exceeded 1200ms budget');
+      }) as unknown as Embedder;
+      const res = await runHybridSearch([source('a', true)], {
+        ...baseCtx,
+        mode: 'hybrid',
+        embedder: throwing,
+        log: () => {},
+      });
+      expect(res.legs.degraded).toBe(true);
+      const health = readLegHealth({ windowMs: 60_000 });
+      expect(health.searches).toBe(1);
+      expect(health.degraded).toBe(1);
+      expect(health.degradedRate).toBe(1);
+    });
   });
 
   it('an instrumentation fault never fails the search', () => {
