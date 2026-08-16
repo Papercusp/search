@@ -1,0 +1,754 @@
+/**
+ * Search orchestration over a set of pluggable `SearchSource`s.
+ *
+ * `runFullTextSearch` runs BM25 only (search:fulltext); `runHybridSearch`
+ * runs BM25 + pgvector embeddings and fuses them via Reciprocal Rank
+ * Fusion (search:semantic). Each source call is independently try/caught:
+ * a source whose index/extension/embedding column is missing degrades to
+ * "skipped" (logged) rather than failing the whole search — this is the
+ * explicit form of the old optional-`ctx.tx` contract (P-013).
+ */
+
+import { rrfCombine, RRF_K_DEFAULT } from '@papercusp/rrf';
+import type { SearchSource, SearchSourceParams, SearchHit, Listing, PgHandle, Embedder, SearchFilters } from './types';
+import { applyRecencyRerank, type RecencyRank } from './recency';
+import { applyMinScore, type MinScoreFloors } from './min-score';
+import { pickTopGroups, countGroups, type GroupKeyOf } from './group';
+import { resolveSearchDefaults, type AppliedDefaults } from './defaults';
+import {
+  newLegAccumulator,
+  legOfRanker,
+  finaliseLeg,
+  summariseLegs,
+  type SearchLegs,
+} from './legs';
+
+export interface SearchContext {
+  sql: PgHandle;
+  query: string;
+  workspaceId: string;
+  scopeFilter: string | null;
+  /** Final result cap (sources may over-fetch internally). */
+  limit: number;
+  /** Optional structured filters threaded to every source (P-002; sources opt in). */
+  filters?: SearchFilters;
+  /** Optional abort signal (e.g. a route timeout watchdog, or a client that
+   *  gave up). Checked before every awaited stage — embed, each source's
+   *  lexical/vector call — so an aborted search stops STARTING work instead of
+   *  grinding every source to completion after the caller stopped listening
+   *  (2026-07-09 incident: timed-out searches burned 34–69s server-side past
+   *  a 30s 408). Also threaded to sources (SearchSourceParams.signal) for
+   *  opt-in statement-level cancellation. An abort REJECTS (AbortError) —
+   *  never a silent partial result — and outranks the graceful skip-a-
+   *  throwing-source degradation.  */
+  signal?: AbortSignal;
+  /** Optional wall-clock budget (ms) for the QUERY-EMBED step only. When the
+   *  embedder takes longer, `runHybridSearch` degrades to BM25-only (queryVec
+   *  stays null) instead of blocking up to the route watchdog. undefined / ≤0
+   *  = unbounded (prior behavior; strictly opt-in per caller). Interactive
+   *  callers (e.g. the desktop transcript-search pill) pass a short budget so a
+   *  slow or COLD query-embedder — a local ONNX cold-start, or a degraded
+   *  OpenAI path under exhausted quota — can't turn a ~20ms BM25 search into a
+   *  30s 408 (2026-07-10: measured search:fulltext 20ms vs hybrid 30s, with all
+   *  the time in the single unbounded `await embedder(query)` below). The
+   *  orphaned embed still runs to completion in the background (warming the
+   *  embedder's memoized pipeline for the next query); only the WAIT is bounded
+   *  — the Embedder fn has no cancel seam. A route-abort via `signal` still
+   *  REJECTS and outranks this timeout. */
+  embedTimeoutMs?: number;
+  /** Optional recency re-rank applied to the fused candidate list BEFORE the
+   *  top-N cut (so a recent-but-lower-relevance candidate in the `limit*3`
+   *  over-fetch pool can be rescued). See {@link RecencyRank}.
+   *
+   *  P-017: absent ⇒ the ENGINE DEFAULT applies (a host policy registered via
+   *  `configureSearchDefaults`), not "off". Pass `false` to force pure-relevance
+   *  ranking regardless of policy. */
+  recency?: RecencyRank | false;
+  /** Optional ROLLUP applied to the fused candidate list immediately before the
+   *  top-N cut: when set, the page keeps only the best-ranked row per group, so
+   *  `limit` counts DISTINCT GROUPS rather than raw rows (P-036).
+   *
+   *  For a caller that ranks rows but PRESENTS something coarser — the
+   *  transcript search ranks session turns and renders session cards — several
+   *  turns from one session otherwise consume several page slots while covering
+   *  one card (measured 2026-08-09: the top-30 `theory` turns covered 24
+   *  distinct sessions). This cannot be fixed by the caller after the fact,
+   *  because the rows that would back-fill the freed slots are past `limit` and
+   *  already discarded; hence a cut-time hook rather than a post-filter.
+   *
+   *  Absent ⇒ byte-identical row-level behaviour. Returning null/undefined for a
+   *  row leaves it ungrouped (it keeps its own slot). NOT a scoring change: it
+   *  cannot promote a group no member row reached the candidate pool with. See
+   *  {@link pickTopGroups}. */
+  groupBy?: GroupKeyOf;
+  /** WI-4734: defer highlight computation to AFTER fusion, for the final top-N
+   *  only. Applies per source and only to sources that implement
+   *  `hydrateHighlights` (others keep inline highlights — safe mixed-source
+   *  behavior). With `limit*3` over-fetch across two rankers, inline
+   *  highlighting computes ~6× more highlight expressions than the caller
+   *  displays; deferral turns that into ONE batched hydration of `limit` rows. */
+  deferHighlight?: boolean;
+  /** How the lexical leg combines the query's terms — see
+   *  {@link SearchSourceParams.lexicalMode}. Threaded through to every source
+   *  unchanged; absent ⇒ each source keeps its historical AND semantics, so
+   *  this is byte-identical for every caller that does not pass it. A source
+   *  that does not implement the mode is free to ignore it. */
+  lexicalMode?: 'and' | 'coverage-graded';
+  /** `coverage-graded` only: the anchor's cost budget in summed per-lexeme
+   *  document frequency — see {@link SearchSourceParams.lexicalAnchorDfBudget}.
+   *  Threaded through unchanged; absent ⇒ each source keeps its own default. */
+  lexicalAnchorDfBudget?: number;
+  /**
+   * Two-stage lexical retrieval. **Default ON**; pass `false` to opt out.
+   *
+   * WHY IT DEFAULTS ON, against the usual "new behaviour ships opt-in" reflex:
+   * every ranking feature before it landed as an optional per-call field that
+   * had to be hand-propagated, and hand-propagation never happened — that is
+   * the measured origin of eight surfaces running with no embedding floor and
+   * six discarding the leg report. An opt-in cascade would reach exactly the
+   * one caller that already has one.
+   *
+   * WHAT IT DOES. Stage 1 is the historical AND query, unchanged. If it
+   * under-fills the requested limit, stage 2 re-queries the same source in
+   * `coverage-graded` mode and APPENDS only rows stage 1 did not return.
+   *
+   * WHY IT IS SAFE HERE WHERE THE CALLER-LEVEL VERSION WAS NOT. WI-8579
+   * measured a single-query swap losing 180 admitted lines across 79 of 120
+   * live turns — a SWAP, not an addition, because the caller's cap and char
+   * budget were applied over a REORDERED walk. Here stage 1's rows keep both
+   * their identity and their order, and stage 2 can only occupy slots stage 1
+   * left empty, so the listing returned is a strict superset of today's. In
+   * hybrid mode RRF fuses on list POSITION, so appended rows also rank strictly
+   * below every stage-1 row: the widening cannot demote an existing hit.
+   *
+   * IT DOES NOT FIRE WHEN THE CALLER SET `lexicalMode`. An explicit mode means
+   * the caller is driving the leg itself — the corpus-injection leg runs its
+   * own two-stage cascade with a separately-derived stage-2 query and a hard
+   * latency budget, and silently cascading inside its stage 1 would both double
+   * its query count and change a measured design out from under it.
+   */
+  lexicalCascade?: boolean;
+  /**
+   * PER-RANKER minimum-score floors, applied to each ranker's list BEFORE
+   * fusion (see {@link MinScoreFloors}).
+   *
+   * This is the only stage at which a weak match can be rejected: RRF fuses
+   * by rank position and discards the native score, so after fusion a rank-1
+   * noise hit is indistinguishable from a rank-1 excellent one. Floors are
+   * per-ranker because `ts_rank_cd` and cosine similarity are different
+   * scales — one global number cannot floor both.
+   *
+   * P-017: absent ⇒ the ENGINE DEFAULT applies (a host policy registered via
+   * `configureSearchDefaults`), NOT "no floor" — that inversion is the whole
+   * point of the seam. Pass `false` to force the unfloored engine regardless
+   * of policy.
+   */
+  minScore?: MinScoreFloors | false;
+  log?: (msg: string) => void;
+}
+
+export interface SearchResult {
+  results: SearchHit[];
+  totalHits: number;
+  /** Distinct groups in the FULL candidate pool, present only when a
+   *  `groupBy` rollup ran. `totalHits` counts rows and so cannot answer "30 of
+   *  how many sessions?" on a grouped page; this can. Optional rather than
+   *  required precisely so no existing caller or fixture is stranded. */
+  totalGroups?: number;
+  /** P-017/P-020: which ranking features actually ran. Stated, never assumed —
+   *  a feature silently not applying is the exact failure this engine had. */
+  applied: AppliedDefaults;
+  /**
+   * P-020: which RANKING LEGS actually ran and what each contributed to
+   * fusion. Reported on every result so a silently single-legged search
+   * cannot look like a healthy one — `legs.degraded` + `legs.warning` are the
+   * ready-made verdict; the per-leg counts are there when you need the why.
+   *
+   * ⚠ Read this, not `embedderAvailable`, to answer "did semantic really
+   * happen": that flag only says a query VECTOR was produced, which stays
+   * true when every per-source embedding query fails and when a leg runs
+   * perfectly but returns nothing (EI-19447237774252790).
+   */
+  legs: SearchLegs;
+}
+
+/**
+ * Run ONE source's lexical leg, widening to a second stage when the first
+ * under-fills. See {@link SearchContext.lexicalCascade} for why this defaults
+ * on and why it is append-only.
+ *
+ * Keyed on `source_id` alone, deliberately: this runs against a SINGLE source,
+ * so `source` is constant across both stages and adding it to the key would
+ * only invite a delimiter (and a delimiter in a composite key is how a NUL
+ * byte ends up in a source file).
+ *
+ * Returns the listing plus how many rows stage 2 contributed, so a caller can
+ * report the widening instead of having it happen invisibly.
+ */
+async function lexicalWithCascade(
+  source: SearchSource,
+  params: SearchSourceParams,
+  opts: { enabled: boolean; callerSetMode: boolean },
+): Promise<{ listing: Listing; stage2Added: number }> {
+  const stage1 = await source.lexical(params);
+  // Under-fill is the trigger, and `>=` is deliberate: a leg that already
+  // filled its limit has nothing to gain and would only pay a second query.
+  if (!opts.enabled || opts.callerSetMode || stage1.length >= params.limit) {
+    return { listing: stage1, stage2Added: 0 };
+  }
+  params.signal?.throwIfAborted();
+  const graded = await source.lexical({ ...params, lexicalMode: 'coverage-graded' });
+  const seen = new Set(stage1.map((item) => item.row.source_id));
+  const room = params.limit - stage1.length;
+  const extra: Listing = [];
+  for (const item of graded) {
+    if (extra.length >= room) break;
+    if (seen.has(item.row.source_id)) continue;
+    extra.push(item);
+  }
+  // Stage 1 FIRST and unmodified. This ordering IS the superset guarantee, not
+  // a cosmetic choice — reversing it reproduces the reordered walk that cost
+  // WI-8579 180 admitted lines.
+  return { listing: [...stage1, ...extra], stage2Added: extra.length };
+}
+
+/** BM25-only full-text search across the given sources (search:fulltext). */
+export async function runFullTextSearch(
+  sources: SearchSource[],
+  ctx: SearchContext,
+): Promise<SearchResult> {
+  // Resolve the ranking policy ONCE up front: caller value wins, `false` is a
+  // hard off, absent falls through to the registered engine default (P-017).
+  const { minScore, applied } = resolveSearchDefaults(
+    { query: ctx.query, limit: ctx.limit, mode: 'fulltext', embedder: null },
+    { minScore: ctx.minScore },
+  );
+  // P-020: a fulltext search has one leg by construction. Report it anyway —
+  // a caller must be able to read the SAME shape from both entry points, and a
+  // source that failed here is just as invisible as it is in hybrid.
+  const lexicalLeg = newLegAccumulator();
+  const semanticLeg = newLegAccumulator();
+  const hits: SearchHit[] = [];
+  for (const source of sources) {
+    ctx.signal?.throwIfAborted();
+    lexicalLeg.attempted = true;
+    try {
+      // The cascade matters MOST here. A HYBRID search whose AND query returns
+      // nothing still has a vector leg, so it merely "degrades to
+      // embeddings-only"; fulltext is lexical BY CONTRACT, so the identical
+      // empty AND query returns an EMPTY PAGE. Measured on the live corpus, the
+      // AND leg returns zero rows for 30% of 1-2 term, 50% of 3-14 term and 70%
+      // of 15+ term REAL queries (D-056).
+      const { listing, stage2Added } = await lexicalWithCascade(
+        source,
+        {
+          sql: ctx.sql,
+          query: ctx.query,
+          workspaceId: ctx.workspaceId,
+          scopeFilter: ctx.scopeFilter,
+          limit: ctx.limit,
+          filters: ctx.filters,
+          signal: ctx.signal,
+          ...(ctx.lexicalMode && ctx.lexicalMode !== 'and' ? { lexicalMode: ctx.lexicalMode } : {}),
+          ...(ctx.lexicalAnchorDfBudget === undefined
+            ? {}
+            : { lexicalAnchorDfBudget: ctx.lexicalAnchorDfBudget }),
+        },
+        { enabled: ctx.lexicalCascade !== false, callerSetMode: ctx.lexicalMode !== undefined },
+      );
+      // Floor before collecting: fulltext has no fusion stage, but the floor
+      // means the same thing here — reject what the ranker itself scored as
+      // noise, in the ranker's own units.
+      const { list, dropped, floor } = applyMinScore(listing, 'lexical', minScore);
+      lexicalLeg.callsRun++;
+      lexicalLeg.candidates += list.length;
+      lexicalLeg.floored += dropped;
+      lexicalLeg.stage2Added += stage2Added;
+      if (dropped > 0) {
+        ctx.log?.(
+          `search:fulltext ${source.name} lexical minScore ${floor} dropped ${dropped}/${listing.length}`,
+        );
+      }
+      // Carry the native score as provenance too, so a caller renders the same
+      // shape whether it came through fulltext or hybrid.
+      for (const item of list) hits.push({ ...item.row, rankerScores: { lexical: item.row.score } });
+    } catch (err) {
+      // Abort outranks graceful degradation: a cancelled search must reject,
+      // not be "skipped" into a quiet partial result.
+      if (ctx.signal?.aborted) throw err;
+      lexicalLeg.callsFailed++;
+      lexicalLeg.failures.push({
+        source: source.name,
+        ranker: 'lexical',
+        error: (err as Error).message,
+      });
+      ctx.log?.(`search:fulltext ${source.name} skipped: ${(err as Error).message}`);
+    }
+  }
+  // Global re-rank by raw score across all sources, then top-N.
+  hits.sort((a, b) => b.score - a.score);
+  return {
+    results: hits.slice(0, ctx.limit),
+    totalHits: hits.length,
+    applied,
+    legs: summariseLegs(finaliseLeg(lexicalLeg), finaliseLeg(semanticLeg)),
+  };
+}
+
+export interface HybridResult extends SearchResult {
+  /** True iff a query embedding was produced (else this was BM25-only). */
+  embedderAvailable: boolean;
+}
+
+/** Thrown internally when the query-embed exceeds `ctx.embedTimeoutMs`. Caught
+ *  by `runHybridSearch` → degrade to BM25-only. Exported so callers/tests can
+ *  distinguish a budget trip from a genuine embedder error. */
+export class EmbedTimeoutError extends Error {
+  constructor(readonly budgetMs: number) {
+    super(`query embed exceeded ${budgetMs}ms budget`);
+    this.name = 'EmbedTimeoutError';
+  }
+}
+
+/** Await `embedder(query)` but give up after `budgetMs` (→ EmbedTimeoutError)
+ *  or when `signal` aborts (→ the abort reason). With neither bound this is a
+ *  bare pass-through, byte-identical to `await embedder(query)`. The losing
+ *  embed promise is NOT cancelled — the `Embedder` fn has no signal seam — but
+ *  its eventual settle is swallowed so a slow embed that finishes after we've
+ *  degraded never surfaces as an unhandled rejection. */
+async function embedWithBudget(
+  embedder: Embedder,
+  query: string,
+  budgetMs: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<number[]> {
+  const p = embedder(query);
+  const bounded = budgetMs !== undefined && budgetMs > 0;
+  if (!bounded && !signal) return p;
+  return await new Promise<number[]>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      fn();
+    };
+    function onAbort(): void {
+      finish(() => reject(signal!.reason ?? new Error('aborted')));
+    }
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener('abort', onAbort);
+    }
+    if (bounded) {
+      timer = setTimeout(() => finish(() => reject(new EmbedTimeoutError(budgetMs!))), budgetMs);
+    }
+    // Swallow the orphaned settle after we've resolved/rejected (no cancel seam).
+    p.then(
+      (v) => finish(() => resolve(v)),
+      (e) => finish(() => reject(e)),
+    );
+  });
+}
+
+/**
+ * Hybrid (BM25 + pgvector) search fused via RRF (search:semantic).
+ *
+ * `mode='hybrid'` runs both rankers; `mode='embeddings'` runs only the
+ * vector ranker. If no embedder is supplied, it throws, or it exceeds
+ * `ctx.embedTimeoutMs`, `hybrid` falls back to BM25-only and `embeddings`
+ * returns empty — mirroring the original tool's silent degradation.
+ */
+export async function runHybridSearch(
+  sources: SearchSource[],
+  ctx: SearchContext & { mode: 'embeddings' | 'hybrid'; embedder: Embedder | null },
+): Promise<HybridResult> {
+  ctx.signal?.throwIfAborted();
+  // P-017: resolve the ranking policy ONCE, before any leg runs — the lexical legs
+  // are floored long before the query vector settles, so this cannot wait on the
+  // embed. Resolving off the embedder INSTANCE (not "was a vector produced") is
+  // what makes that safe: a host keys its floor to the embedding space it
+  // calibrated, and if the vector leg never runs there are no embedding hits for
+  // an embedding floor to filter anyway.
+  const { minScore: minScoreFloors, recency: recencyRank, applied } = resolveSearchDefaults(
+    { query: ctx.query, limit: ctx.limit, mode: ctx.mode, embedder: ctx.embedder },
+    { minScore: ctx.minScore, recency: ctx.recency },
+  );
+  // WI-4734: kick the query-embed off WITHOUT awaiting it — the BM25 legs don't
+  // need the vector, so they run CONCURRENTLY with the embed instead of behind
+  // it (the old serial shape put the whole embed latency on the critical path
+  // even though BM25 was independent). The vector legs await it below.
+  const embedP = ctx.embedder
+    ? embedWithBudget(ctx.embedder, ctx.query, ctx.embedTimeoutMs, ctx.signal)
+    : null;
+  // Pre-attach a no-op catch so an embed failure that settles while BM25 is
+  // still running never surfaces as an unhandled rejection (it is re-awaited —
+  // and properly handled — below).
+  embedP?.catch(() => {});
+
+  // P-020: per-leg execution accounting. Fed at the two choke points every
+  // candidate must pass through (`floorList` for what the floor removed,
+  // `recordInput` for what actually reached fusion), so a new ranker leg
+  // cannot be added later and quietly go unreported.
+  const legs = { lexical: newLegAccumulator(), semantic: newLegAccumulator() };
+
+  // Over-fetch per source so RRF has fusion headroom before the top-N cut.
+  const candidateLimit = ctx.limit * 3;
+  const inputs: Array<{ name: string; list: Listing }> = [];
+
+  // Pre-fusion provenance. RRF's output score is an RRF value, not a native
+  // one, and the native score is gone the moment fusion runs — so capture it
+  // here, per ranker, keyed by the fusion key. `keyOfRow` lets the final hits
+  // find their own entry without re-deriving rrfCombine's first-occurrence
+  // rule: it keeps the row OBJECT that fusion carries through.
+  const nativeByKey = new Map<string, Record<string, number>>();
+  const keyOfRow = new Map<SearchHit, string>();
+  /** Apply `ranker`'s floor (if any) to a source's list, logging what it cut. */
+  const floorList = (list: Listing, ranker: string, sourceName: string): Listing => {
+    const { list: kept, dropped, floor } = applyMinScore(list, ranker, minScoreFloors);
+    legOfRanker(ranker, legs).floored += dropped;
+    if (dropped > 0) {
+      ctx.log?.(
+        `${ranker} ${sourceName} minScore ${floor} dropped ${dropped}/${list.length}`,
+      );
+    }
+    return kept;
+  };
+  /** Record a floored list's native scores, then enqueue it as an RRF input.
+   *  `rankOffset` marks a list that CONTINUES another ranking rather than
+   *  standing on its own — see {@link rrfCombine}'s `rankOffset`. */
+  const recordInput = (ranker: string, list: Listing, rankOffset?: number): void => {
+    // Counted here rather than at the query: this is the post-floor,
+    // post-dedupe list fusion genuinely sees, which is the only number that
+    // distinguishes "the leg ran" from "the leg contributed".
+    legOfRanker(ranker, legs).candidates += list.length;
+    for (const entry of list) {
+      keyOfRow.set(entry.row, entry.key);
+      const existing = nativeByKey.get(entry.key);
+      if (existing) {
+        // First occurrence wins, mirroring rrfCombine's row-payload rule.
+        if (!(ranker in existing)) existing[ranker] = entry.score;
+      } else {
+        nativeByKey.set(entry.key, { [ranker]: entry.score });
+      }
+    }
+    inputs.push({ name: ranker, list, ...(rankOffset ? { rankOffset } : {}) });
+  };
+  const sourceParams = (source: SearchSource): SearchSourceParams => ({
+    sql: ctx.sql,
+    query: ctx.query,
+    workspaceId: ctx.workspaceId,
+    scopeFilter: ctx.scopeFilter,
+    limit: candidateLimit,
+    filters: ctx.filters,
+    signal: ctx.signal,
+    // Only defer for a source that can hydrate afterwards; others keep inline
+    // highlights so mixed-source calls stay correct.
+    ...(ctx.deferHighlight && source.hydrateHighlights ? { wantHighlight: false } : {}),
+    // Passed through only when the caller asked for a non-default mode, so a
+    // source cannot tell "caller said 'and'" from "caller said nothing" — the
+    // two must behave identically and this makes that structural.
+    ...(ctx.lexicalMode && ctx.lexicalMode !== 'and' ? { lexicalMode: ctx.lexicalMode } : {}),
+    // Same rule as lexicalMode above: passed through ONLY when the caller set
+    // it, so a source cannot tell "caller said nothing" from "caller said the
+    // default". 0 is a MEANINGFUL value here (argmin-only), so test for
+    // undefined rather than truthiness.
+    ...(ctx.lexicalAnchorDfBudget === undefined
+      ? {}
+      : { lexicalAnchorDfBudget: ctx.lexicalAnchorDfBudget }),
+  });
+
+  // Fresh-candidate window (RecencyRank.freshWindowMs): when the recency
+  // re-rank is active, ALSO fetch a BM25 candidate list restricted to the
+  // recent window, as one more RRF input. Without it, the re-rank can only
+  // reorder candidates that survived the relevance-only over-fetch cut — on a
+  // large corpus old high-term-density rows can fill the whole pool and starve
+  // every recent match out of eligibility (WI-5097: the agents-pill search
+  // returned nothing from the current day). Skipped when the caller's own
+  // `since` filter is already as narrow or narrower.
+  const recencyWeight = recencyRank ? Math.max(0, Math.min(1, recencyRank.weight ?? 0.3)) : 0;
+  const freshWindowMs = recencyRank?.freshWindowMs ?? 0;
+  let freshSinceIso: string | null = null;
+  if (ctx.mode === 'hybrid' && recencyWeight > 0 && freshWindowMs > 0) {
+    const nowMs = recencyRank?.now ?? Date.now();
+    const freshSinceMs = nowMs - freshWindowMs;
+    const callerSinceMs = ctx.filters?.since ? Date.parse(ctx.filters.since) : NaN;
+    if (!(Number.isFinite(callerSinceMs) && callerSinceMs >= freshSinceMs)) {
+      freshSinceIso = new Date(freshSinceMs).toISOString();
+    }
+  }
+
+  if (ctx.mode === 'hybrid') {
+    // All BM25 legs in parallel (independent queries; postgres-js pools).
+    // Promise.all preserves source order, so RRF input order — and therefore
+    // tie-breaking — is deterministic and identical to the old serial loop.
+    // The fresh legs join the SAME fan-out (one concurrent stage, no extra
+    // latency step).
+    const runLeg = async (source: SearchSource, since: string | null): Promise<Listing | null> => {
+      ctx.signal?.throwIfAborted();
+      const label = since ? 'lexical-fresh' : 'lexical';
+      // P-020: EXECUTION accounting, recorded HERE rather than at the floor /
+      // fusion choke points below. Those two see only candidates, so they can
+      // never separate "the leg ran and found nothing" from "the leg never
+      // ran" — which is precisely the question `status` exists to answer, and
+      // the distinction the measured EI-19447237774252790 case turns on.
+      const leg = legOfRanker(label, legs);
+      leg.attempted = true;
+      try {
+        const params = sourceParams(source);
+        // Cascade the MAIN lexical leg only, never `lexical-fresh`. The fresh
+        // leg is a window-restricted supplementary RRF input, so under-filling
+        // is its NORMAL state — the window is genuinely small — rather than the
+        // signal of AND-semantics elimination that the trigger is meant to
+        // detect. Cascading it would fire on nearly every search and buy a
+        // second query per source for rows the main leg's own cascade already
+        // reaches.
+        if (since) {
+          const listing = await source.lexical({
+            ...params,
+            filters: { ...params.filters, since },
+          });
+          leg.callsRun++;
+          return listing;
+        }
+        const { listing, stage2Added } = await lexicalWithCascade(source, params, {
+          enabled: ctx.lexicalCascade !== false,
+          callerSetMode: ctx.lexicalMode !== undefined,
+        });
+        leg.callsRun++;
+        leg.stage2Added += stage2Added;
+        return listing;
+      } catch (err) {
+        if (ctx.signal?.aborted) throw err;
+        leg.callsFailed++;
+        leg.failures.push({ source: source.name, ranker: label, error: (err as Error).message });
+        ctx.log?.(`${label} ${source.name} skipped: ${(err as Error).message}`);
+        return null;
+      }
+    };
+    const [lexicalLists, freshLists] = await Promise.all([
+      Promise.all(sources.map((source) => runLeg(source, null))),
+      freshSinceIso
+        ? Promise.all(sources.map((source) => runLeg(source, freshSinceIso)))
+        : Promise.resolve(sources.map((): Listing | null => null)),
+    ]);
+    for (let i = 0; i < sources.length; i++) {
+      const sourceName = sources[i]!.name;
+      const raw = lexicalLists[i];
+      // Floor BOTH legs before the identity check below, so the "same ranking
+      // twice" verdict is made on the lists fusion will actually see.
+      const list = raw ? floorList(raw, 'lexical', sourceName) : null;
+      if (list) recordInput('lexical', list);
+      const rawFresh = freshLists[i];
+      const fresh = rawFresh ? floorList(rawFresh, 'lexical-fresh', sourceName) : null;
+      // P-003: the fresh leg exists to guarantee recent rows a SEAT in the
+      // candidate pool (WI-5097) — not to give them a second relevance vote.
+      // rrfCombine SUMS contributions per key, so a row appearing in both legs
+      // used to collect 1/(k+mainRank) + 1/(k+freshRank), i.e. recency counted
+      // once here as inflated relevance and again in the recency blend. Only
+      // rows the relevance-only cut actually MISSED need adding, so dedupe
+      // against the main list. This also subsumes the old identical-list guard:
+      // a source that ignores `since` returns the same rows, every one of which
+      // is filtered out here, leaving nothing to push.
+      const alreadyPooled = new Set((list ?? []).map((entry) => entry.key));
+      const freshOnly = fresh ? fresh.filter((entry) => !alreadyPooled.has(entry.key)) : null;
+      // ⚠ DO NOT RE-ADD A `rankOffset` HERE WITHOUT READING D-047 FIRST.
+      //
+      // There is a REAL and still-unresolved rank-scale problem in this leg:
+      // what survives the dedupe is, BY CONSTRUCTION, exactly the rows the
+      // relevance-only cut MISSED — rows the main leg already beat. Fused as an
+      // independent input they are re-indexed from 0 against nothing but each
+      // other, so the best of them collects 1/(k+1): the identical contribution
+      // the single best row in the whole corpus receives. That is measured
+      // (D-044) and it cost the owner-reported `theory` query real recall.
+      //
+      // The obvious correction — `recordInput('lexical-fresh', freshOnly,
+      // list.length)`, continuing the main ranking instead of restarting it —
+      // WAS SHIPPED ON 2026-08-09 AND REVERTED THE SAME HOUR. It is not merely
+      // imperfect; at the default weight it makes WI-5097's rescue
+      // ARITHMETICALLY IMPOSSIBLE, and it broke a guard that had been stable
+      // since 2026-07-16:
+      //
+      //   applyRecencyRerank's 'linear' mode RANK-normalises relevance
+      //   (normRel = 1 - rank/(n-1), see recency.ts). Offsetting by the FULL
+      //   main-list length places every fresh-only row strictly BELOW every
+      //   main-list row, so a lone rescued row lands last ⇒ normRel is exactly
+      //   0. The blend is (1-w)·normRel + w·decay, so at w=0.3 its ceiling is
+      //   0.3·1 = 0.3, while any first-place stale row floors at 0.7·1 = 0.7.
+      //   No decay value can close that gap. The seat is granted and the rescue
+      //   is then unwinnable — which is precisely the bug WI-5097 fixed and
+      //   D-004 says must never be re-opened.
+      //
+      // So the two constraints are in genuine tension ON THE OFFSET AXIS, and
+      // there the resolution is a TUNING question, not a sign flip: the offset
+      // must be large enough to deny a fresh-only row the corpus-best
+      // contribution, yet small enough to leave it above last place so decay
+      // can still lift it.
+      //
+      // D-068: they are NOT in tension on the CARDINALITY axis, which is where
+      // the live defect actually sits. The offset governs WHERE an admitted row
+      // lands; nothing governed HOW MANY were admitted. The fresh leg is called
+      // with the same `candidateLimit` as the main leg, so a dense window could
+      // admit up to the entire pool — and then "a seat" is the whole room.
+      //
+      // Measured against the real engine at Report 1's scale (k=30, 8
+      // ground-truth rows 7d old, 90 rows inside the 48h window):
+      //
+      //   fresh-admission cap   ground truth in top-30   fresh in top-30
+      //   unbounded (old)       0/8   (recall 0.000)     30
+      //   limit                 0/8   (recall 0.000)     30
+      //   floor(limit/2)        8/8   (recall 1.000)     15
+      //   floor(limit/4)        8/8   (recall 1.000)      7
+      //   fresh leg OFF         8/8                       —
+      //
+      // The unbounded row reproduces the owner-reported `theory` failure
+      // exactly (recall 0.000, every slot taken by in-window rows). Capping at
+      // `limit` is NOT enough — the measured cliff is at floor(limit/2), which
+      // is the largest cap that fully recovers this corpus. WI-5097's guarantee
+      // is about REPRESENTATION, not domination, and its own fixture has
+      // exactly ONE row in the window, so every cap >= 1 preserves it by
+      // construction.
+      //
+      // ⚠ Bound AFTER the dedupe, never on the fresh query's limit: admit the
+      // top-N rows the relevance cut actually MISSED, not the top-N recent rows
+      // (most of which the main leg may already hold).
+      //
+      // ⚠ Any change here must be measured against BOTH guards — this test file
+      // AND the P-015 owner eval — never either alone. D-045 improved the eval
+      // (0/8 → 2/8) and was still reverted for breaking WI-5097 here.
+      // The live P-015 trials at limit/3 and limit/4 both met the 2/8 floor;
+      // limit/4 had better graded precision and nDCG, so keep the quarter-page
+      // cap as the conservative production choice.
+      const freshSeats = Math.max(1, Math.floor(ctx.limit / 4));
+      if (freshOnly && freshOnly.length > 0) {
+        // The fresh leg grants bounded admission, not a second relevance vote.
+        // Starting the admitted rows at rank zero is intentional: they are
+        // candidates the relevance cut missed, and the recency blend must be
+        // able to lift a sparse rescue into the page. A continuation offset
+        // makes that rescue mathematically unreachable under the linear blend;
+        // the post-dedupe seat cap is the stable guard against dense-window
+        // domination.
+        recordInput('lexical-fresh', freshOnly.slice(0, freshSeats));
+      }
+    }
+  }
+
+  let queryVec: number[] | null = null;
+  if (embedP) {
+    try {
+      queryVec = await embedP;
+    } catch (err) {
+      // A route-abort outranks the timeout: rethrow so a cancelled search
+      // rejects. An EmbedTimeoutError or a genuine embedder failure is caught
+      // here → queryVec stays null → BM25-only degrade (embedderAvailable=false).
+      if (ctx.signal?.aborted) throw err;
+      // P-020: the semantic leg WAS wanted (an embedder is configured) but
+      // could not be attempted at all. That is `blocked` — distinct from a
+      // source call failing, and it must not read as `not-run`, which means
+      // "never wanted" and would make a dead embedder look like a plain
+      // lexical-only search.
+      legs.semantic.attempted = true;
+      legs.semantic.blocked = `query embed failed: ${(err as Error).message}`;
+      ctx.log?.(`search:semantic query embed failed: ${(err as Error).message}`);
+    }
+  }
+
+  if (queryVec) {
+    const qVec = `[${queryVec.join(',')}]`;
+    const embedLists = await Promise.all(
+      sources.map(async (source) => {
+        // A source with no embedding query has no semantic leg to attempt.
+        // Leaving `attempted` false here is what makes "no registered source
+        // implements one" report `not-run` instead of a phantom failure.
+        if (!source.embedding) return null;
+        ctx.signal?.throwIfAborted();
+        legs.semantic.attempted = true;
+        try {
+          const listing = await source.embedding({ ...sourceParams(source), qVec });
+          legs.semantic.callsRun++;
+          return listing;
+        } catch (err) {
+          if (ctx.signal?.aborted) throw err;
+          legs.semantic.callsFailed++;
+          legs.semantic.failures.push({
+            source: source.name,
+            ranker: 'embeddings',
+            error: (err as Error).message,
+          });
+          ctx.log?.(`embed ${source.name} skipped: ${(err as Error).message}`);
+          return null;
+        }
+      }),
+    );
+    for (let i = 0; i < sources.length; i++) {
+      const list = embedLists[i];
+      if (!list) continue;
+      // The floor matters most here: on a sparsely-embedded corpus the vector
+      // leg returns its k nearest rows whether or not any of them is a match,
+      // and fusion would hand rank-1 noise the same weight as a real hit.
+      recordInput('embeddings', floorList(list, 'embeddings', sources[i]!.name));
+    }
+  }
+
+  const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);
+  // Optional recency re-rank over the FULL candidate pool, before the top-N cut.
+  const fused = recencyRank ? applyRecencyRerank(fusedRaw, recencyRank) : fusedRaw;
+  // P-036: the optional rollup sits BETWEEN the re-rank and the cut — the only
+  // point where the full pool is in final order and still intact. Ordering
+  // matters: rolling up before the recency re-rank would pick each group's
+  // representative by relevance alone and then let the re-rank reorder a page
+  // whose members were already chosen, which is not the same page.
+  const page = ctx.groupBy
+    ? pickTopGroups(fused, ctx.groupBy, ctx.limit)
+    : fused.slice(0, ctx.limit);
+  const results = page.map(({ row, score, rankers }) => {
+    const key = keyOfRow.get(row);
+    const native = key === undefined ? undefined : nativeByKey.get(key);
+    // Copy: `nativeByKey` keeps accumulating per-key state and callers mutate
+    // hits (highlight hydration below), so the hit must not alias it.
+    return { ...row, score, rankers, ...(native ? { rankerScores: { ...native } } : {}) };
+  });
+
+  // WI-4734: hydrate highlights for the FINAL top-N only (per deferring source,
+  // one batched call). Best-effort — a hydration failure degrades that source's
+  // highlights to '' rather than failing a search that already has results.
+  if (ctx.deferHighlight) {
+    const bySource = new Map<string, SearchHit[]>();
+    for (const hit of results) {
+      const list = bySource.get(hit.source);
+      if (list) list.push(hit);
+      else bySource.set(hit.source, [hit]);
+    }
+    await Promise.all(
+      sources.map(async (source) => {
+        const hits = bySource.get(source.name);
+        if (!hits?.length || !source.hydrateHighlights) return;
+        ctx.signal?.throwIfAborted();
+        try {
+          const highlights = await source.hydrateHighlights(
+            sourceParams(source),
+            hits.map((h) => h.source_id),
+          );
+          for (const h of hits) h.highlight = highlights.get(h.source_id) ?? h.highlight;
+        } catch (err) {
+          if (ctx.signal?.aborted) throw err;
+          ctx.log?.(`highlight ${source.name} skipped: ${(err as Error).message}`);
+        }
+      }),
+    );
+  }
+
+  return {
+    results,
+    totalHits: fused.length,
+    ...(ctx.groupBy ? { totalGroups: countGroups(fused, ctx.groupBy) } : {}),
+    embedderAvailable: !!queryVec,
+    applied,
+    legs: summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic)),
+  };
+}
