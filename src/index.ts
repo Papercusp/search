@@ -66,6 +66,7 @@ export {
   sampleOfLegs,
   LEG_HEALTH_CAPACITY,
   type LegHealthWindow,
+  type LegSample,
 } from './leg-health';
 export {
   configureSearchDefaults,

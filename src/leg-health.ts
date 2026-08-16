@@ -47,7 +47,7 @@ import type { SearchLegs } from './legs';
 export const LEG_HEALTH_CAPACITY = 512;
 
 /** One recorded search outcome. Deliberately tiny — this is written on every search. */
-interface LegSample {
+export interface LegSample {
   atMs: number;
   degraded: boolean;
   semanticBlocked: boolean;
