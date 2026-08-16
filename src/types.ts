@@ -56,6 +56,23 @@ export interface SearchHit {
    * field would make a degraded run look uniformly irrelevant.
    */
   rerankScore?: number;
+  /**
+   * HOST-DEFINED, ENGINE-OPAQUE per-hit metadata — the same contract as `scope`
+   * and `ts`: a source sets it, the engine carries it through fusion untouched
+   * (fusion spreads the row), and no ranker ever reads it.
+   *
+   * It exists because a caller downstream of fusion often has to distinguish
+   * sub-populations WITHIN one source, and the alternatives are all worse: a
+   * second query to re-fetch a column the source already had, parsing it back
+   * out of `excerpt`, or promoting a domain concept into this generic type.
+   * papercusp's first use is the `work_item` source stamping `lane`, so corpus
+   * recall can tell a curated work-item from an observation-lane sample — two
+   * populations that share a relation, an id space, and until then a label.
+   *
+   * Values are strings (or null) on purpose: this is a passthrough label bag,
+   * not a place to smuggle structure the engine would then be tempted to rank on.
+   */
+  meta?: Readonly<Record<string, string | null>>;
 }
 
 /** A single source's ranked list, keyed for RRF fusion. */
