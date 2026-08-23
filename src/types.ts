@@ -92,6 +92,10 @@ export interface SearchFilters {
   owners?: string[];
   /** Restrict to one turn speaker/role (e.g. 'user' | 'assistant' | 'tool'). */
   speaker?: string;
+  /** Restrict transcript rows to a persisted turn-origin verdict. */
+  turnOrigin?: string;
+  /** Restrict transcript rows to turns affirmatively typed as owner speech. */
+  ownerOnly?: boolean;
   /** Restrict to one session/conversation id. */
   sessionId?: string;
   /** Restrict to one source kind (e.g. a client/transport label). */
