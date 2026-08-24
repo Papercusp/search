@@ -101,6 +101,15 @@ export interface SearchFilters {
   turnOrigin?: string;
   /** Restrict transcript rows to turns affirmatively typed as owner speech. */
   ownerOnly?: boolean;
+  /**
+   * Restrict transcript rows to turns that COULD be owner speech — proven owner
+   * turns plus ones whose origin is unenrolled (a user turn with no
+   * machine-injection envelope). Wider than `ownerOnly`, which a host may
+   * define so strictly that it cannot match on some source kinds; narrower than
+   * no filter, which admits machine-injected rows recorded under a user
+   * speaker. Hosts that do not distinguish enrolment may treat it as `ownerOnly`.
+   */
+  ownerCandidates?: boolean;
   /** Restrict to one session/conversation id. */
   sessionId?: string;
   /** Restrict to one source kind (e.g. a client/transport label). */
