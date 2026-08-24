@@ -4,8 +4,13 @@ import type { RankedItem } from '@papercusp/rrf';
 /** The Postgres handle a search runs against — a postgres-js tagged template. */
 export type PgHandle = Sql;
 
-/** Turns a query string into an embedding vector (for the pgvector ranker). */
-export type Embedder = (text: string) => Promise<number[]>;
+/** Turns a query string into an embedding vector (for the pgvector ranker).
+ *
+ * The optional signal lets a transport-backed embedder stop work when an
+ * interactive search gives up. Pure/in-process embedders may ignore it: that
+ * preserves the useful legacy behavior where a timed-out cold model keeps
+ * warming in the background. */
+export type Embedder = (text: string, signal?: AbortSignal) => Promise<number[]>;
 
 /** One returned search hit, neutral across BM25 / embeddings / fused. */
 export interface SearchHit {

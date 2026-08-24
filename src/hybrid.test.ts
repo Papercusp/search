@@ -331,6 +331,31 @@ describe('embed budget (embedTimeoutMs)', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('exceeded 10ms budget'));
   });
 
+  it('aborts transport-backed embed work when the query budget expires (WI-41248)', async () => {
+    let embedSignal: AbortSignal | undefined;
+    const abortAwareEmbedder: Embedder = (_text, signal) => {
+      embedSignal = signal;
+      return new Promise<number[]>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        void resolve; // the transport never answers before cancellation
+      });
+    };
+    const a = fakeSource('A', { lexical: [hit('A', '1', 3)], embedding: [hit('A', '9', 9)] });
+
+    const res = await runHybridSearch([a], {
+      ...baseCtx, mode: 'hybrid', embedder: abortAwareEmbedder, embedTimeoutMs: 10,
+    });
+
+    expect(res.embedderAvailable).toBe(false);
+    expect(embedSignal?.aborted).toBe(true);
+    expect(embedSignal?.reason).toBeInstanceOf(EmbedTimeoutError);
+    expect(a.embedding).not.toHaveBeenCalled();
+  });
+
   it('a query-embed within the budget runs the semantic leg normally', async () => {
     const embedder: Embedder = async () => [0.1, 0.2, 0.3];
     const a = fakeSource('A', { lexical: [hit('A', '1', 3)], embedding: [hit('A', '1', 9)] });

@@ -52,10 +52,10 @@ export interface SearchContext {
    *  OpenAI path under exhausted quota — can't turn a ~20ms BM25 search into a
    *  30s 408 (2026-07-10: measured search:fulltext 20ms vs hybrid 30s, with all
    *  the time in the single unbounded `await embedder(query)` below). The
-   *  orphaned embed still runs to completion in the background (warming the
-   *  embedder's memoized pipeline for the next query); only the WAIT is bounded
-   *  — the Embedder fn has no cancel seam. A route-abort via `signal` still
-   *  REJECTS and outranks this timeout. */
+   *  budget is passed to the embedder as an AbortSignal: transport-backed
+   *  embedders stop their queued HTTP work, while pure/in-process embedders may
+   *  ignore it and keep warming in the background. A route-abort via `signal`
+   *  still REJECTS and outranks this timeout. */
   embedTimeoutMs?: number;
   /** Optional recency re-rank applied to the fused candidate list BEFORE the
    *  top-N cut (so a recent-but-lower-relevance candidate in the `limit*3`
@@ -317,19 +317,22 @@ export class EmbedTimeoutError extends Error {
 
 /** Await `embedder(query)` but give up after `budgetMs` (→ EmbedTimeoutError)
  *  or when `signal` aborts (→ the abort reason). With neither bound this is a
- *  bare pass-through, byte-identical to `await embedder(query)`. The losing
- *  embed promise is NOT cancelled — the `Embedder` fn has no signal seam — but
- *  its eventual settle is swallowed so a slow embed that finishes after we've
- *  degraded never surfaces as an unhandled rejection. */
+ *  bare pass-through, byte-identical to `await embedder(query)`. A bounded call
+ *  receives a derived signal so transport-backed embedders can cancel queued
+ *  work. Embedders that ignore it retain the legacy warm-in-background shape;
+ *  their eventual settle is swallowed. */
 async function embedWithBudget(
   embedder: Embedder,
   query: string,
   budgetMs: number | undefined,
   signal: AbortSignal | undefined,
 ): Promise<number[]> {
-  const p = embedder(query);
   const bounded = budgetMs !== undefined && budgetMs > 0;
-  if (!bounded && !signal) return p;
+  if (!bounded && !signal) return embedder(query);
+  if (signal?.aborted) throw signal.reason ?? new Error('aborted');
+
+  const embedAbort = new AbortController();
+  const p = embedder(query, embedAbort.signal);
   return await new Promise<number[]>((resolve, reject) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -341,7 +344,9 @@ async function embedWithBudget(
       fn();
     };
     function onAbort(): void {
-      finish(() => reject(signal!.reason ?? new Error('aborted')));
+      const reason = signal!.reason ?? new Error('aborted');
+      embedAbort.abort(reason);
+      finish(() => reject(reason));
     }
     if (signal) {
       if (signal.aborted) {
@@ -351,9 +356,13 @@ async function embedWithBudget(
       signal.addEventListener('abort', onAbort);
     }
     if (bounded) {
-      timer = setTimeout(() => finish(() => reject(new EmbedTimeoutError(budgetMs!))), budgetMs);
+      timer = setTimeout(() => {
+        const error = new EmbedTimeoutError(budgetMs!);
+        embedAbort.abort(error);
+        finish(() => reject(error));
+      }, budgetMs);
     }
-    // Swallow the orphaned settle after we've resolved/rejected (no cancel seam).
+    // Swallow a late settle from an embedder that deliberately ignores abort.
     p.then(
       (v) => finish(() => resolve(v)),
       (e) => finish(() => reject(e)),
