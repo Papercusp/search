@@ -114,9 +114,13 @@ describe('summariseEmbedSamples — PURE arithmetic', () => {
     // the ring can hold ⇒ evictions happened.
     const w = summariseEmbedSamples(samples, 60 * 60_000, T0 + 10_000, true);
     expect(w.truncatedByCapacity).toBe(true);
-    // A short window fully covered by the ring is NOT truncated.
-    const fresh = Array.from({ length: 20 }, (_, i) => sample({ atMs: T0 - i }));
-    const w2 = summariseEmbedSamples(fresh, 60 * 60_000, T0 + 1, true);
+    // A full ring whose retained data FULLY COVERS the window (the window
+    // does not reach back past the oldest retained sample) is NOT truncated —
+    // the read is a total, not a floor.
+    const covered = Array.from({ length: EMBED_LATENCY_CAPACITY }, (_, i) =>
+      sample({ atMs: T0 - i * 60_000 }),
+    );
+    const w2 = summariseEmbedSamples(covered, 60 * 60_000, T0 + 10_000, true);
     expect(w2.truncatedByCapacity).toBe(false);
   });
 });
