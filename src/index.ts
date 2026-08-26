@@ -69,6 +69,19 @@ export {
   type LegSample,
 } from './leg-health';
 export {
+  observeEmbedLatency,
+  readEmbedLatency,
+  embedLatencyObservedCount,
+  resetEmbedLatency,
+  summariseEmbedSamples,
+  EMBED_LATENCY_CAPACITY,
+  UNATTRIBUTED_CALLER,
+  type EmbedLatencyWindow,
+  type EmbedCallerLatency,
+  type EmbedLatencySample,
+  type EmbedLatencyOutcome,
+} from './embed-latency';
+export {
   configureSearchDefaults,
   resetSearchDefaults,
   searchDefaultsHost,

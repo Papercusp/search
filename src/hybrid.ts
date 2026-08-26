@@ -23,6 +23,7 @@ import {
   type SearchLegs,
 } from './legs';
 import { observeLegs } from './leg-health';
+import { observeEmbedLatency, UNATTRIBUTED_CALLER, type EmbedLatencyOutcome } from './embed-latency';
 
 export interface SearchContext {
   sql: PgHandle;
@@ -57,6 +58,14 @@ export interface SearchContext {
    *  ignore it and keep warming in the background. A route-abort via `signal`
    *  still REJECTS and outranks this timeout. */
   embedTimeoutMs?: number;
+  /** WHO is embedding — the per-caller label the embed-latency sampler groups
+   *  by (EI-21491088289861649). The sampler turns each embed into a
+   *  {caller, budgetMs, durationMs, outcome} sample so a p99-vs-budget breach
+   *  is detected AS a breach instead of surfacing downstream as a claim about
+   *  peers, matches or corpus coverage. Optional: unlabeled traffic lands
+   *  under 'unattributed', visibly, rather than polluting a named caller's
+   *  percentiles. */
+  caller?: string;
   /** Optional recency re-rank applied to the fused candidate list BEFORE the
    *  top-N cut (so a recent-but-lower-relevance candidate in the `limit*3`
    *  over-fetch pool can be rescued). See {@link RecencyRank}.
@@ -326,9 +335,32 @@ async function embedWithBudget(
   query: string,
   budgetMs: number | undefined,
   signal: AbortSignal | undefined,
+  caller: string = UNATTRIBUTED_CALLER,
 ): Promise<number[]> {
+  const startedAtMs = Date.now();
   const bounded = budgetMs !== undefined && budgetMs > 0;
-  if (!bounded && !signal) return embedder(query);
+  if (!bounded && !signal) {
+    try {
+      const v = await embedder(query);
+      observeEmbedLatency({
+        atMs: Date.now(),
+        caller,
+        budgetMs: null,
+        durationMs: Date.now() - startedAtMs,
+        outcome: 'ok',
+      });
+      return v;
+    } catch (err) {
+      observeEmbedLatency({
+        atMs: Date.now(),
+        caller,
+        budgetMs: null,
+        durationMs: Date.now() - startedAtMs,
+        outcome: 'error',
+      });
+      throw err;
+    }
+  }
   if (signal?.aborted) throw signal.reason ?? new Error('aborted');
 
   const embedAbort = new AbortController();
@@ -336,10 +368,25 @@ async function embedWithBudget(
   return await new Promise<number[]>((resolve, reject) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Lockstep recorder for the three graded terminal paths below (timeout /
+    // ok / error): every recorded sample carries the same shape, stamped with
+    // the caller and the budget it was actually graded against. The ABORT
+    // path records nothing — a caller-side cancellation says nothing about
+    // embed latency, and letting cancellations into the window would poison
+    // p99 with noise that has no remedy.
+    const record = (outcome: EmbedLatencyOutcome): void => {
+      observeEmbedLatency({
+        atMs: Date.now(),
+        caller,
+        budgetMs: bounded ? budgetMs! : null,
+        durationMs: Date.now() - startedAtMs,
+        outcome,
+      });
+    };
     const finish = (fn: () => void): void => {
       if (settled) return;
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       if (signal) signal.removeEventListener('abort', onAbort);
       fn();
     };
@@ -359,13 +406,26 @@ async function embedWithBudget(
       timer = setTimeout(() => {
         const error = new EmbedTimeoutError(budgetMs!);
         embedAbort.abort(error);
-        finish(() => reject(error));
+        finish(() => {
+          record('timeout');
+          reject(error);
+        });
       }, budgetMs);
     }
     // Swallow a late settle from an embedder that deliberately ignores abort.
+    // A late settle AFTER a timeout/abort already finished is a no-op here
+    // (finish's settled guard), so it cannot double-record.
     p.then(
-      (v) => finish(() => resolve(v)),
-      (e) => finish(() => reject(e)),
+      (v) =>
+        finish(() => {
+          record('ok');
+          resolve(v);
+        }),
+      (e) =>
+        finish(() => {
+          record('error');
+          reject(e);
+        }),
     );
   });
 }
@@ -398,7 +458,7 @@ export async function runHybridSearch(
   // it (the old serial shape put the whole embed latency on the critical path
   // even though BM25 was independent). The vector legs await it below.
   const embedP = ctx.embedder
-    ? embedWithBudget(ctx.embedder, ctx.query, ctx.embedTimeoutMs, ctx.signal)
+    ? embedWithBudget(ctx.embedder, ctx.query, ctx.embedTimeoutMs, ctx.signal, ctx.caller)
     : null;
   // Pre-attach a no-op catch so an embed failure that settles while BM25 is
   // still running never surfaces as an unhandled rejection (it is re-awaited —
