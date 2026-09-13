@@ -18,7 +18,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import type { RankedItem } from '@papercusp/rrf';
 import { runFullTextSearch, runHybridSearch, type SearchContext } from './hybrid';
 import { configureSearchDefaults, resetSearchDefaults, resolveSearchDefaults } from './defaults';
-import type { SearchSource, SearchHit, Listing, PgHandle, Embedder } from './types';
+import type { SearchSource, SearchHit, SearchSourceParams, Listing, PgHandle, Embedder } from './types';
 
 const sql = {} as PgHandle;
 
