@@ -449,7 +449,12 @@ export async function runHybridSearch(
   // what makes that safe: a host keys its floor to the embedding space it
   // calibrated, and if the vector leg never runs there are no embedding hits for
   // an embedding floor to filter anyway.
-  const { minScore: minScoreFloors, recency: recencyRank, applied } = resolveSearchDefaults(
+  const {
+    minScore: minScoreFloors,
+    recency: recencyRank,
+    embeddingProfile,
+    applied,
+  } = resolveSearchDefaults(
     { query: ctx.query, limit: ctx.limit, mode: ctx.mode, embedder: ctx.embedder },
     { minScore: ctx.minScore, recency: ctx.recency },
   );
@@ -518,6 +523,7 @@ export async function runHybridSearch(
     query: ctx.query,
     workspaceId: ctx.workspaceId,
     scopeFilter: ctx.scopeFilter,
+    ...(embeddingProfile ? { embeddingProfile } : {}),
     limit: candidateLimit,
     filters: ctx.filters,
     signal: ctx.signal,

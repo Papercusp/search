@@ -87,6 +87,11 @@ export interface SearchDefaultsHost {
    * `undefined` for pure-relevance ranking.
    */
   recency?(ctx: SearchDefaultsContext): RecencyRank | undefined;
+  /** Optional exact vector-space provenance for storage-aware sources. Like
+   * floors, this is resolved from the embedder instance once per search. */
+  embeddingProfile?(ctx: SearchDefaultsContext):
+    | { profileId: string; legacyMode: string | null }
+    | undefined;
 }
 
 let host: SearchDefaultsHost | null = null;
@@ -159,13 +164,25 @@ export interface AppliedDefaults {
 export function resolveSearchDefaults(
   ctx: SearchDefaultsContext,
   explicit: { minScore?: MinScoreFloors | false; recency?: RecencyRank | false },
-): { minScore: MinScoreFloors | undefined; recency: RecencyRank | undefined; applied: AppliedDefaults } {
+): {
+  minScore: MinScoreFloors | undefined;
+  recency: RecencyRank | undefined;
+  embeddingProfile: { profileId: string; legacyMode: string | null } | undefined;
+  applied: AppliedDefaults;
+} {
   const policy = host;
   const minScore = resolveDefault(explicit.minScore, policy?.minScore, ctx);
   const recency = resolveDefault(explicit.recency, policy?.recency, ctx);
+  let embeddingProfile: { profileId: string; legacyMode: string | null } | undefined;
+  try {
+    embeddingProfile = policy?.embeddingProfile?.(ctx);
+  } catch {
+    embeddingProfile = undefined;
+  }
   return {
     minScore,
     recency,
+    embeddingProfile,
     applied: {
       minScore: minScore ?? null,
       recency: !!recency,

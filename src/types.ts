@@ -127,6 +127,14 @@ export interface SearchSourceParams {
   workspaceId: string;
   /** When non-null, restrict to this intra-workspace scope key (sources without a scope column ignore it). */
   scopeFilter: string | null;
+  /** Exact vector-space provenance resolved from the query embedder by the
+   * host policy. Sources with versioned stored identity must fail closed when
+   * this is absent; `legacyMode` is an optional rolling-upgrade alias whose
+   * interpretation remains host-owned. */
+  embeddingProfile?: {
+    profileId: string;
+    legacyMode: string | null;
+  };
   /** Per-source row cap. fulltext passes `limit`; hybrid over-fetches (`limit*3`). */
   limit: number;
   /** Optional structured filters (see SearchFilters). Absent = no narrowing. */

@@ -70,6 +70,27 @@ describe('configureSearchDefaults — the three-way contract', () => {
     expect(res.applied.policyRegistered).toBe(true);
   });
 
+  it('threads host-resolved exact embedding profile to every vector source', async () => {
+    const seen: SearchSourceParams[] = [];
+    const src: SearchSource = {
+      name: 'identity',
+      lexical: async () => [],
+      embedding: async (p) => {
+        seen.push(p);
+        return [];
+      },
+    };
+    configureSearchDefaults({
+      embeddingProfile: () => ({ profileId: 'test-profile@v1', legacyMode: 'test' }),
+    });
+    await runHybridSearch([src], { ...baseCtx, mode: 'hybrid', embedder });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.embeddingProfile).toEqual({
+      profileId: 'test-profile@v1',
+      legacyMode: 'test',
+    });
+  });
+
   it('lets an EXPLICIT caller value win over the registered default', async () => {
     configureSearchDefaults({ minScore: () => ({ embeddings: 0.5 }) });
     const res = await runHybridSearch([vectorSource()], {
