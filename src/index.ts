@@ -91,4 +91,16 @@ export {
   type SearchDefaultsContext,
   type AppliedDefaults,
 } from './defaults';
+export {
+  splitWindows,
+  splitMarkdown,
+  splitOnLineBoundaries,
+  chunkAnchor,
+  sectionAnchorBase,
+  isContinuationAnchor,
+  CHUNK_ANCHOR_SEP,
+  type WindowSplitOptions,
+  type MarkdownSplitOptions,
+  type MarkdownSection,
+} from './chunk';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';
