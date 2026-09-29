@@ -52,6 +52,33 @@ explicit form of the old optional-`ctx.tx` contract — the DB handle is a
 declared parameter, and absence/error per source yields empty, not a
 crash.
 
+## Chunking
+
+An embedder reads a bounded window, so text past it is invisible to the
+vector leg. `chunk.ts` splits long text into pieces that are embedded one by
+one; a chunked parent is scored by its best chunk, never the mean, since
+averaging brings back the dilution chunking removes.
+
+- `splitWindows(text, { size, overlap, maxChunks })` — fixed-width windows
+  with overlap, content-blind. For unstructured prose (chat turns).
+- `splitMarkdown(body, { maxChars, minChars?, headingDepth?, maxSections?, maxRows? })`
+  — one `{ anchor, headingPath, content }` per heading, fence-aware. A section
+  longer than `maxChars` is split on line boundaries into continuation parts
+  whose anchor is `<anchor>~N` (`chunkAnchor`; `sectionAnchorBase` and
+  `isContinuationAnchor` read it back). For documents.
+
+```ts
+import { splitMarkdown, splitWindows } from '@papercusp/search';
+
+const windows = splitWindows(turnText, { size: 1500, overlap: 250, maxChunks: 16 });
+const sections = splitMarkdown(pageBody, { maxChars: 2000 });
+```
+
+Both were moved here verbatim from the Papercusp operator's turn and doc
+chunkers, and `chunk.golden.test.ts` pins their output against the pre-move
+code, so a change to either shows up as a failing test instead of as stored
+chunks that no longer match what the splitter produces.
+
 ## Extraction status
 
 Extracted per `papercusp-systems-abstraction-2026-05-29`, items P-013
