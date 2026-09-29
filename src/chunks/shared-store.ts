@@ -15,6 +15,12 @@
  * `updated_at` stores the parent's versionSql value AS READ at sync time (not
  * now()), so a parent edited while its chunks were being written stays
  * "newer than its chunks" and is picked up again: no commit race.
+ *
+ * The version travels as PG text end to end and is bound as `$n::text::timestamptz`.
+ * postgres-js describes a statement's parameter types and serializes a
+ * timestamptz parameter through `new Date(x)`, even when x is a string, which
+ * truncates microseconds; the stored copy would then compare older than its
+ * parent forever and the parent would be re-selected on every tick.
  */
 
 import type { Sql } from 'postgres';
@@ -142,7 +148,7 @@ export function sharedChunkStore(opts: SharedChunkStoreOptions = {}): ChunkStore
            (surface, parent_key, chunk_idx, anchor, header, content, parent_sha, chunk_sha,
             splitter_version, embedding, embedding_mode, embedding_profile, updated_at)
          SELECT $1, $2::text[], u.idx::int, u.anchor, u.header, u.content, $3, u.chunk_sha,
-                $4, u.embedding::vector, u.embedding_mode, u.embedding_profile, coalesce($5::timestamptz, now())
+                $4, u.embedding::vector, u.embedding_mode, u.embedding_profile, coalesce($5::text::timestamptz, now())
            FROM unnest($6::text[], $7::text[], $8::text[], $9::text[], $10::text[], $11::text[], $12::text[], $13::text[])
                 AS u(idx, anchor, header, content, chunk_sha, embedding, embedding_mode, embedding_profile)`,
         [
@@ -165,7 +171,7 @@ export function sharedChunkStore(opts: SharedChunkStoreOptions = {}): ChunkStore
 
     async touch(sql, surface, key, version) {
       await sql.unsafe(
-        `UPDATE ${table} SET updated_at = coalesce($3::timestamptz, now())
+        `UPDATE ${table} SET updated_at = coalesce($3::text::timestamptz, now())
           WHERE surface = $1 AND parent_key = $2::text[]`,
         [surface.surface, [...key], version] as never[],
       );
