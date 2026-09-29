@@ -103,4 +103,5 @@ export {
   type MarkdownSplitOptions,
   type MarkdownSection,
 } from './chunk';
+export * from './chunks/index';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';

@@ -1,0 +1,33 @@
+export {
+  DEFAULT_CHUNK_MIN_CHARS,
+  CHUNK_KEY_SEP,
+  splitterVersionOf,
+  resolveChunkSurface,
+  parentShaOf,
+  embeddedChunkText,
+  chunkParentKeyId,
+  planChunks,
+  syncChunkSurface,
+  syncChunkSurfaces,
+  type ChunkPlan,
+} from './engine';
+export { sharedChunkStore, parentShaSql, type SharedChunkStoreOptions } from './shared-store';
+export type {
+  ChunkSurface,
+  ChunkSplitter,
+  WindowChunkSplitter,
+  MarkdownChunkSplitter,
+  ChunkKeyColumn,
+  ResolvedChunkSurface,
+  ChunkStore,
+  StaleParent,
+  ExistingChunk,
+  PlannedChunk,
+  ChunkRowToWrite,
+  ChunkWriteMeta,
+  ChunkHash,
+  ChunkSyncLogger,
+  ChunkSurfaceSyncStats,
+  ChunkSyncResult,
+  ChunkSyncOptions,
+} from './types';
