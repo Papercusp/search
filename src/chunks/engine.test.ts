@@ -80,9 +80,10 @@ class FakeStore implements ChunkStore {
         (s.versionSql
           ? c0.updatedAt.getTime() >= (p.version?.getTime() ?? -Infinity)
           : c0.parentSha === parentShaOf(sha, p.text, p.header));
-      if (!fresh) out.push({ key: p.key, text: p.text, header: p.header, version: p.version });
+      if (!fresh) out.push({ key: p.key, text: p.text, header: p.header, version: p.version?.toISOString() ?? null });
     }
-    if (s.versionSql) out.sort((a, b) => (b.version?.getTime() ?? 0) - (a.version?.getTime() ?? 0));
+    const ms = (v: string | null) => (v === null ? 0 : Date.parse(v));
+    if (s.versionSql) out.sort((a, b) => ms(b.version) - ms(a.version));
     return out.slice(0, opts.limit);
   }
   async readExisting(_sql: Sql, _s: ResolvedChunkSurface, key: readonly string[]) {
@@ -96,14 +97,14 @@ class FakeStore implements ChunkStore {
         ...r,
         parentSha: meta.parentSha,
         splitterVersion: meta.splitterVersion,
-        updatedAt: meta.version ?? new Date(),
+        updatedAt: meta.version ? new Date(meta.version) : new Date(),
       })),
     );
     if (rows.length === 0) this.chunks.delete(this.id(key));
   }
-  async touch(_sql: Sql, _s: ResolvedChunkSurface, key: readonly string[], version: Date | null) {
+  async touch(_sql: Sql, _s: ResolvedChunkSurface, key: readonly string[], version: string | null) {
     this.touched++;
-    for (const c of this.chunks.get(this.id(key)) ?? []) c.updatedAt = version ?? new Date();
+    for (const c of this.chunks.get(this.id(key)) ?? []) c.updatedAt = version ? new Date(version) : new Date();
   }
   async prune(_sql: Sql, s: ResolvedChunkSurface, opts: { limit: number }) {
     let parents = 0;

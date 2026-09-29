@@ -76,7 +76,7 @@ export function sharedChunkStore(opts: SharedChunkStoreOptions = {}): ChunkStore
         : `c.parent_sha = ${parentShaSql(text, header)}`;
       const query = `
         SELECT ${keyArr} AS parent_key, ${text} AS text, ${header} AS header,
-               ${version ?? 'NULL::timestamptz'} AS version
+               (${version ?? 'NULL::timestamptz'})::text AS version
           FROM ${surface.parent.table} p
          WHERE length(${text}) > ${p.add(surface.minChars)}
            ${surface.eligibleSql ? `AND (${surface.eligibleSql})` : ''}
@@ -88,9 +88,9 @@ export function sharedChunkStore(opts: SharedChunkStoreOptions = {}): ChunkStore
                 AND c.chunk_idx = 0
                 AND c.splitter_version = ${p.add(surface.splitterVersion)}
                 AND ${fresh})
-         ${version ? 'ORDER BY 4 DESC NULLS LAST' : ''}
+         ${version ? `ORDER BY ${version} DESC NULLS LAST` : ''}
          LIMIT ${p.add(limit)}`;
-      const rows = await sql.unsafe<{ parent_key: string[]; text: string; header: string | null; version: Date | null }[]>(
+      const rows = await sql.unsafe<{ parent_key: string[]; text: string; header: string | null; version: string | null }[]>(
         query,
         p.values as never[],
       );

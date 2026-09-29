@@ -97,8 +97,14 @@ export interface StaleParent {
   key: string[];
   text: string;
   header: string | null;
-  /** The parent's versionSql value when read; null when the surface has none. */
-  version: Date | null;
+  /**
+   * The parent's versionSql value as read, in Postgres text form; null when
+   * the surface has none. Opaque to the engine and written back verbatim:
+   * text keeps Postgres's microsecond precision, which a JS Date truncates to
+   * milliseconds, and a truncated write-back reads as older than its parent,
+   * so the parent would be re-selected forever.
+   */
+  version: string | null;
 }
 
 /** A stored chunk, as read back before a parent is rewritten. */
@@ -135,7 +141,8 @@ export interface ChunkRowToWrite extends PlannedChunk {
 export interface ChunkWriteMeta {
   parentSha: string;
   splitterVersion: string;
-  version: Date | null;
+  /** StaleParent.version, verbatim. */
+  version: string | null;
 }
 
 /**
@@ -168,7 +175,7 @@ export interface ChunkStore {
     meta: ChunkWriteMeta,
   ): Promise<void>;
   /** The text did not change: advance the stored version only. */
-  touch(sql: Sql, surface: ResolvedChunkSurface, key: readonly string[], version: Date | null): Promise<void>;
+  touch(sql: Sql, surface: ResolvedChunkSurface, key: readonly string[], version: string | null): Promise<void>;
   /**
    * Delete the chunks of up to `limit` parents that were deleted, became
    * ineligible, or shrank to minChars or less. Returns the chunk rows deleted.
