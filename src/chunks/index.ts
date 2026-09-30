@@ -12,6 +12,16 @@ export {
   type ChunkPlan,
 } from './engine';
 export { sharedChunkStore, parentShaSql, type SharedChunkStoreOptions } from './shared-store';
+export {
+  chunkAwareVectorLeg,
+  chunkAwareVectorLegSql,
+  chunkVectorTableOf,
+  type ChunkAwareVectorLegOptions,
+  type ChunkAwareLegRow,
+  type ChunkLegMode,
+  type ParentVectorColumns,
+  type SpaceFilterColumns,
+} from './vector-leg';
 export type {
   ChunkSurface,
   ChunkSplitter,

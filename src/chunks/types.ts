@@ -82,6 +82,27 @@ export interface ChunkSurface {
   chunkMargin?: number;
   /** Where chunks are stored. Default: the shared store (sharedChunkStore()). */
   store?: ChunkStore;
+  /**
+   * The parent's own embedding columns, read by the chunk-aware vector leg
+   * (chunkAwareVectorLeg). Optional because sync never reads them.
+   */
+  parentVector?: { column: string; profileColumn?: string; modeColumn?: string };
+}
+
+/**
+ * Where a store's chunk vectors can be READ from, for the chunk-aware vector leg.
+ * 'shared' = one table for every surface keyed (surface, parent_key text[]);
+ * 'typed' = a per-surface table carrying the parent key columns by name.
+ * Column names default to embedding / embedding_profile / embedding_mode, and the
+ * anchor to 'anchor' for shared keying (none for typed). null = the column is absent.
+ */
+export interface ChunkVectorTable {
+  table: string;
+  keying: 'shared' | 'typed';
+  anchorColumn?: string | null;
+  embeddingColumn?: string;
+  profileColumn?: string | null;
+  modeColumn?: string | null;
 }
 
 /** A surface after validation, with its defaults applied. */
