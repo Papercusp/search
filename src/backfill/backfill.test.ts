@@ -183,6 +183,25 @@ describe('backfillTable', () => {
     expect(s).toMatchObject({ scanned: 5, embedded: 5, errors: 0 });
   });
 
+  it('a batch failed by one bad row still embeds every other row of that batch (R-10)', async () => {
+    const table: FakeTable = { rows: rows('a', 'BAD', 'c', 'd') };
+    const db = fakeDb({ 's.t': table });
+    const embedMany = vi.fn(async (texts: string[]) => {
+      if (texts.includes('BAD')) throw new Error('bad input in batch');
+      return texts.map(() => [1, 2, 3]);
+    });
+    const embed = vi.fn(async (text: string) => {
+      if (text === 'BAD') throw new Error('bad input');
+      return vec3(text);
+    });
+    const s = await backfillTable(db.sql, target('s.t'), { ...base, embed, embedMany, logger: quiet() });
+    expect(embedMany).toHaveBeenCalledTimes(1);
+    // The failed batch falls back to per-row: only the bad row fails, once.
+    expect(embed.mock.calls.map((c) => c[0])).toEqual(['a', 'BAD', 'c', 'd']);
+    expect(s).toMatchObject({ scanned: 4, embedded: 3, errors: 1 });
+    expect(table.rows.filter((r) => !r.stale).map((r) => r.key)).toEqual(['r0', 'r2', 'r3']);
+  });
+
   it('a failing chunk stops batching for that pull and warns once', async () => {
     const db = fakeDb({ 's.t': { rows: rows('a', 'b', 'c', 'd') } });
     const log = quiet();
