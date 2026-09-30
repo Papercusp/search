@@ -163,17 +163,37 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
   const margin = opts.chunkMargin ?? opts.surface.chunkMargin ?? 0;
   if (!Number.isFinite(margin) || margin < 0) throw new Error('chunk vector leg: chunk margin must be a finite number >= 0');
 
+  const scan = opts.scan ?? 'ann';
+  if (scan !== 'ann' && scan !== 'exact') throw new Error(`chunk vector leg: unknown scan '${String(scan)}'`);
+  const exact = scan === 'exact';
+
   const filter = opts.parentFilter ?? sql`TRUE`;
   const space = opts.spaceFilter ?? (() => sql`TRUE`);
   const q = opts.qVec;
   const keySelect = sql.unsafe(keys.map((k) => `${alias}.${k.column}`).join(', '));
   const keyNames = sql.unsafe(keys.map((k) => k.column).join(', '));
 
+  // 'exact': the filter runs once, into a materialised slice that keeps the
+  // parent's own column names, so both legs read `alias.col` unchanged and no
+  // vector index can serve either ORDER BY. 'ann': both legs read the table.
+  const profileCol = pv.profileColumn ? ident(pv.profileColumn, 'parent profile column') : null;
+  const modeCol = pv.modeColumn ? ident(pv.modeColumn, 'parent mode column') : null;
+  const sliceCols = [...new Set([...keys.map((k) => k.column), ident(pv.column, 'parent vector column'), profileCol, modeCol])]
+    .filter((c): c is string => c !== null)
+    .map((c) => `${alias}.${c}`)
+    .join(', ');
+  const slice = exact
+    ? sql`WITH ${sql.unsafe(SLICE_CTE)} AS MATERIALIZED (
+        SELECT ${sql.unsafe(sliceCols)} FROM ${sql.unsafe(parentTable)} ${sql.unsafe(alias)} WHERE (${filter}))`
+    : sql``;
+  const parentSource = sql.unsafe(`${exact ? SLICE_CTE : parentTable} ${alias}`);
+  const parentWhere = exact ? sql`TRUE` : filter;
+
   const parentLeg = sql`
     (SELECT ${keySelect}, (${sql.unsafe(parentVec)} <=> ${q}::vector) AS distance,
             NULL::text AS matched_anchor, 0 AS leg
-       FROM ${sql.unsafe(parentTable)} ${sql.unsafe(alias)}
-      WHERE (${filter})
+       FROM ${parentSource}
+      WHERE (${parentWhere})
         AND ${sql.unsafe(parentVec)} IS NOT NULL
         AND (${space({
           profileColumn: pv.profileColumn ? `${alias}.${ident(pv.profileColumn, 'parent profile column')}` : null,
@@ -191,30 +211,39 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
     const anchor = anchorCol ? `${CHUNK_ALIAS}.${ident(anchorCol, 'chunk anchor column')}` : 'NULL::text';
     const profile = chunks.profileColumn === null ? null : `${CHUNK_ALIAS}.${ident(chunks.profileColumn ?? 'embedding_profile', 'chunk profile column')}`;
     const modeCol = chunks.modeColumn === null ? null : `${CHUNK_ALIAS}.${ident(chunks.modeColumn ?? 'embedding_mode', 'chunk mode column')}`;
+    // 'exact' over the shared table compares the whole key array, in the same
+    // `ARRAY[(p.col)::text, ...]` form the shared store writes it, so the chunk
+    // table's (surface, parent_key, chunk_idx) key index serves each lookup.
     const join = chunks.keying === 'shared'
-      ? keys
-          .map((k, i) => (k.type
-            ? `${alias}.${k.column} = ${CHUNK_ALIAS}.parent_key[${i + 1}]::${k.type}`
-            : `${alias}.${k.column}::text = ${CHUNK_ALIAS}.parent_key[${i + 1}]`))
-          .join(' AND ')
+      ? exact
+        ? `${CHUNK_ALIAS}.parent_key = ARRAY[${keys.map((k) => `(${alias}.${k.column})::text`).join(', ')}]`
+        : keys
+            .map((k, i) => (k.type
+              ? `${alias}.${k.column} = ${CHUNK_ALIAS}.parent_key[${i + 1}]::${k.type}`
+              : `${alias}.${k.column}::text = ${CHUNK_ALIAS}.parent_key[${i + 1}]`))
+            .join(' AND ')
       : keys.map((k) => `${alias}.${k.column} = ${CHUNK_ALIAS}.${k.column}`).join(' AND ');
     const surfaceMatch = chunks.keying === 'shared' ? sql`${sql.unsafe(CHUNK_ALIAS)}.surface = ${surfaceName} AND` : sql``;
+    // 'exact' orders by the output distance, which adds the margin: an HNSW
+    // index can only serve `ORDER BY <column> <=> <query>` itself, so this sort is
+    // exhaustive over the slice's chunks. Same order, since the margin is constant.
+    const chunkOrder = exact ? sql`distance` : sql`${sql.unsafe(emb)} <=> ${q}::vector`;
     legs = sql`${parentLeg}
     UNION ALL
     (SELECT ${keySelect}, (${sql.unsafe(emb)} <=> ${q}::vector) + ${margin}::float8 AS distance,
             ${sql.unsafe(anchor)} AS matched_anchor, 1 AS leg
        FROM ${sql.unsafe(table)} ${sql.unsafe(CHUNK_ALIAS)}
-       JOIN ${sql.unsafe(parentTable)} ${sql.unsafe(alias)} ON ${sql.unsafe(join)}
-      WHERE ${surfaceMatch} (${filter})
+       JOIN ${parentSource} ON ${sql.unsafe(join)}
+      WHERE ${surfaceMatch} (${parentWhere})
         AND ${sql.unsafe(emb)} IS NOT NULL
         AND (${space({ profileColumn: profile, modeColumn: modeCol })})
-   ORDER BY ${sql.unsafe(emb)} <=> ${q}::vector
+   ORDER BY ${chunkOrder}
       LIMIT ${opts.limit})`;
   }
 
   // Parenthesised legs keep each ORDER BY/LIMIT on its own branch; without them
   // the LIMIT binds to the whole UNION and one leg can starve the other out.
-  return sql`
+  return sql`${slice}
     SELECT ${keyNames}, distance, matched_anchor FROM (
       SELECT DISTINCT ON (${keyNames}) ${keyNames}, distance, matched_anchor
         FROM (${legs}) scored

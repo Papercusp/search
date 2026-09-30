@@ -34,6 +34,7 @@ export {
   type ChunkAwareVectorLegOptions,
   type ChunkAwareLegRow,
   type ChunkLegMode,
+  type ChunkLegScan,
   type ParentVectorColumns,
   type SpaceFilterColumns,
 } from './vector-leg';
