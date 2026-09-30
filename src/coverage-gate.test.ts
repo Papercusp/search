@@ -36,7 +36,12 @@ const gate = createCoverageGate({
   thresholds: { coverageFloor: 0.8, recentFloor: 0.9, minRecentSample: 5, maxSampleAgeMs: 30 * 60_000 },
 });
 
-const sample = (surface: string, embedded: number, eligible: number, extra: Partial<CoverageSample> = {}): CoverageSample => ({
+const sample = (
+  surface: string,
+  embedded: number | string,
+  eligible: number | string,
+  extra: Partial<CoverageSample> = {},
+): CoverageSample => ({
   surface,
   observedAt: minutesAgo(5),
   eligibleRows: eligible,
@@ -211,7 +216,8 @@ describe('measure', () => {
       { now: NOW },
     );
     expect(calls).toHaveLength(1);
-    expect(s).toMatchObject({ surface: NOTES.replace('library.notes.vec', 'library.notes.vec'), eligibleRows: 200, embeddedRows: 150 });
+    expect(s).toMatchObject({ surface: NOTES, eligibleRows: 200, embeddedRows: 150, recentEligible: 10, recentEmbedded: 10 });
+    expect(calls[0]?.params).toEqual(['model-b', 24]);
     const a = gate.assessSource('notes', gate.snapshot([s], NOW));
     expect(a.verdict).toBe('degraded');
     expect(a.note).toMatch(/historical backlog/);
