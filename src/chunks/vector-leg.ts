@@ -27,6 +27,7 @@
 import type { Fragment } from 'postgres';
 import { withIterativeScan } from '../hnsw-iterative-scan';
 import type { PgHandle } from '../types';
+import { sharedChunkStore } from './shared-store';
 import type { ChunkKeyColumn, ChunkStore, ChunkSurface, ChunkVectorTable } from './types';
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
@@ -106,19 +107,20 @@ function keyColumnsOf(key: readonly ChunkKeyColumn[], surface: string): KeyCol[]
   });
 }
 
-/** The chunk table to read, from the options or the surface's store. */
+/**
+ * The chunk table to read: the override, else the surface's store, else the
+ * shared store — the same default sync writes to when a surface names no store.
+ */
 export function chunkVectorTableOf(
   surface: Pick<ChunkSurface, 'surface' | 'store'>,
   override?: ChunkVectorTable,
-  fallbackStore?: Pick<ChunkStore, 'name' | 'queryTable'>,
 ): ChunkVectorTable {
   if (override) return override;
-  const store = surface.store ?? fallbackStore;
-  if (store?.queryTable) return store.queryTable;
+  const store: Pick<ChunkStore, 'name' | 'queryTable'> = surface.store ?? sharedChunkStore();
+  if (store.queryTable) return store.queryTable;
   throw new Error(
-    `chunk vector leg: surface '${surface.surface}' has no readable chunk table` +
-      (store ? ` (store '${store.name}' declares no queryTable)` : '') +
-      '; pass `chunks` or give the store a queryTable',
+    `chunk vector leg: surface '${surface.surface}' has no readable chunk table ` +
+      `(store '${store.name}' declares no queryTable); pass \`chunks\` or give the store a queryTable`,
   );
 }
 

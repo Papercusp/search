@@ -30,6 +30,7 @@ export type {
   ChunkKeyColumn,
   ResolvedChunkSurface,
   ChunkStore,
+  ChunkVectorTable,
   StaleParent,
   ExistingChunk,
   PlannedChunk,

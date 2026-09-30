@@ -66,6 +66,7 @@ export function sharedChunkStore(opts: SharedChunkStoreOptions = {}): ChunkStore
 
   return {
     name: table,
+    queryTable: { table, keying: 'shared' },
 
     async transaction(sql, fn) {
       return (await sql.begin((tx) => fn(tx as unknown as Sql))) as Awaited<ReturnType<typeof fn>>;

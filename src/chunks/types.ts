@@ -174,6 +174,8 @@ export interface ChunkWriteMeta {
 export interface ChunkStore {
   /** Human-readable name for logs, e.g. 'harness_shared.text_chunks'. */
   readonly name: string;
+  /** Where the chunk-aware vector leg reads this store's vectors. Absent = not queryable. */
+  readonly queryTable?: ChunkVectorTable;
   /** Run fn in one transaction (a parent's delete + insert must be atomic). */
   transaction<T>(sql: Sql, fn: (tx: Sql) => Promise<T>): Promise<T>;
   /**
