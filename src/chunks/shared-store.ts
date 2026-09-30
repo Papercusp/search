@@ -46,12 +46,20 @@ function keyTextArray(surface: ResolvedChunkSurface): string {
   return `ARRAY[${surface.keyColumns.map((k) => `(p.${k.column})::text`).join(', ')}]`;
 }
 
-/** Parent-key equality that keeps the parent's primary-key index usable. */
+/**
+ * Parent-key equality. A typed key casts the chunk side, so the parent's
+ * primary-key index stays usable; an untyped key compares the parent column as
+ * text, the same form the chunk-aware vector leg uses (vector-leg.ts). For a
+ * text or varchar column that cast is a no-op and the index is still used; for
+ * any other column type it is still correct, where a bare `p.col = parent_key[i]`
+ * fails with "operator does not exist: uuid = text" (measured on
+ * harness_shared.operator_turns, 2026-09-30).
+ */
 function keyMatchesChunk(surface: ResolvedChunkSurface, chunkAlias: string): string {
   return surface.keyColumns
     .map((k, i) => {
       const part = `${chunkAlias}.parent_key[${i + 1}]`;
-      return k.type === null ? `p.${k.column} = ${part}` : `p.${k.column} = (${part})::${k.type}`;
+      return k.type === null ? `(p.${k.column})::text = ${part}` : `p.${k.column} = (${part})::${k.type}`;
     })
     .join(' AND ');
 }
