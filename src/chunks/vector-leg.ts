@@ -37,6 +37,17 @@ const CHUNK_ALIAS = 'c';
 
 export type ChunkLegMode = 'retrieve' | 'gist';
 
+/**
+ * How each leg ranks. 'ann' orders by the vector operator itself, so an HNSW
+ * index can serve the ORDER BY. 'exact' materialises the parents `parentFilter`
+ * keeps, then ranks that slice and its chunks exhaustively, reaching the chunks
+ * through the chunk table's key index instead of the vector index.
+ */
+export type ChunkLegScan = 'ann' | 'exact';
+
+/** The CTE an 'exact' leg materialises the filtered parents into. */
+const SLICE_CTE = 'chunk_leg_slice';
+
 /** The parent's own embedding columns. */
 export interface ParentVectorColumns {
   column: string;
@@ -72,6 +83,15 @@ export interface ChunkAwareVectorLegOptions {
   chunkMargin?: number;
   /** The active embedding-space predicate (D-011). Default: no constraint. */
   spaceFilter?: (cols: SpaceFilterColumns) => Fragment;
+  /**
+   * Default 'ann'. Choose 'exact' when `parentFilter` keeps a small fraction of
+   * the table: an HNSW scan under a selective filter discards most of what it
+   * reads before it fills the LIMIT, and exhaustive ranking of the slice is
+   * cheaper and returns the true nearest rows. Measured on work_items:search's
+   * feature family (about 2% of rows and of the surface's chunks): 131 ms ANN,
+   * about 20k rows discarded, against about 30 ms per leg exact.
+   */
+  scan?: ChunkLegScan;
 }
 
 /** One pooled row. Key columns are present under their own names. */
