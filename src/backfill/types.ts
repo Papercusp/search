@@ -10,14 +10,14 @@
  * (shared-vector-search-libraries-2026-09-29, P-006 per decision D-004).
  */
 
+import type { PgHandle } from '../types';
+
 /**
- * The part of a SQL client the engine uses: `unsafe(text, params)`, which is
- * postgres.js's shape. Every table and column name the engine interpolates comes
- * from the host's own {@link BackfillTarget}; every row value is a bound parameter.
+ * The part of the SQL client the engine uses: postgres.js's `unsafe(text, params)`.
+ * Every table and column name the engine interpolates comes from the host's own
+ * {@link BackfillTarget}; every row value is a bound parameter.
  */
-export interface BackfillSql {
-  unsafe<T = unknown>(query: string, params?: unknown[]): PromiseLike<T>;
-}
+export type BackfillSql = Pick<PgHandle, 'unsafe'>;
 
 /** One table whose vector column the engine keeps filled. */
 export interface BackfillTarget {
