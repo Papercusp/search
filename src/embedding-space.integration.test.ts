@@ -6,7 +6,14 @@
  */
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { createEmbeddingSpace } from './embedding-space';
+import * as realSubject from './embedding-space';
+
+// Copy-out mutation probes point this at a mutated copy of ./embedding-space.ts,
+// so falsifiability is proven without dirtying the shared tree.
+const subjectPath = process.env.PAPERCUSP_SEARCH_EMBEDDING_SPACE_SUBJECT;
+const { createEmbeddingSpace }: typeof realSubject = subjectPath
+  ? ((await import(subjectPath)) as typeof realSubject)
+  : realSubject;
 
 const SCHEMA = `es_it_${process.pid}_${Date.now()}`;
 const T = `${SCHEMA}.rows`;

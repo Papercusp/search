@@ -9,16 +9,20 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import {
+import type { CoverageSample, CoverageSqlHandle } from './coverage-gate';
+import * as realSubject from './coverage-gate';
+
+// Copy-out mutation probes point this at a mutated copy of ./coverage-gate.ts,
+// so falsifiability is proven without dirtying the shared tree.
+const subjectPath = process.env.PAPERCUSP_SEARCH_COVERAGE_GATE_SUBJECT;
+const {
   DEFAULT_COVERAGE_THRESHOLDS,
   assessSurfaceCoverage,
   buildCoverageCountQuery,
   buildCoverageSnapshot,
   createCoverageGate,
   measureSurfaceCoverage,
-  type CoverageSample,
-  type CoverageSqlHandle,
-} from './coverage-gate';
+}: typeof realSubject = subjectPath ? ((await import(subjectPath)) as typeof realSubject) : realSubject;
 
 const NOW = new Date('2026-01-10T12:00:00Z');
 const minutesAgo = (m: number): Date => new Date(NOW.getTime() - m * 60_000);

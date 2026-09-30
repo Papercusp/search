@@ -6,14 +6,20 @@
  * embed-space-self-check.
  */
 import { describe, expect, it, vi } from 'vitest';
-import {
+import type { SelfCheckCanary } from './embedding-space-self-check';
+import * as realSubject from './embedding-space-self-check';
+
+// Copy-out mutation probes point this at a mutated copy of
+// ./embedding-space-self-check.ts, so falsifiability is proven without dirtying
+// the shared tree.
+const subjectPath = process.env.PAPERCUSP_SEARCH_SELF_CHECK_SUBJECT;
+const {
   DEFAULT_DESYNC_DISTANCE_THRESHOLD,
   cosineDistance,
   isEmbeddingDesync,
   parseVectorText,
   runStoredRowSelfCheck,
-  type SelfCheckCanary,
-} from './embedding-space-self-check';
+}: typeof realSubject = subjectPath ? ((await import(subjectPath)) as typeof realSubject) : realSubject;
 
 const STORED = [1, 0];
 /** A unit vector whose cosine distance from [1, 0] is exactly `d`. */

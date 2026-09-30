@@ -15,8 +15,16 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { createEmbeddingSpace, type EmbeddingSpaceConfig } from './embedding-space';
+import type { EmbeddingSpaceConfig } from './embedding-space';
+import * as realSubject from './embedding-space';
 import type { PgHandle } from './types';
+
+// Copy-out mutation probes point this at a mutated copy of ./embedding-space.ts,
+// so falsifiability is proven without dirtying the shared tree.
+const subjectPath = process.env.PAPERCUSP_SEARCH_EMBEDDING_SPACE_SUBJECT;
+const { createEmbeddingSpace }: typeof realSubject = subjectPath
+  ? ((await import(subjectPath)) as typeof realSubject)
+  : realSubject;
 
 interface Rendered { text: string; binds: unknown[] }
 interface Fixture {

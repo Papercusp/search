@@ -18,14 +18,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-import {
+import * as realSubject from './near-duplicate';
+
+// Copy-out mutation probes point this at a mutated copy of ./near-duplicate.ts,
+// so falsifiability is proven without dirtying the shared tree.
+const subjectPath = process.env.PAPERCUSP_SEARCH_NEAR_DUPLICATE_SUBJECT;
+const {
   DEFAULT_BACKGROUND_SAMPLE_LIMIT,
   DEFAULT_MIN_BACKGROUND_SAMPLES,
   DEFAULT_NEAR_DUPLICATE_QUANTILE,
   calibrateNearDuplicateCut,
   checkNearDuplicates,
   nearestRankQuantile,
-} from './near-duplicate';
+}: typeof realSubject = subjectPath ? ((await import(subjectPath)) as typeof realSubject) : realSubject;
 
 interface BackgroundSpec {
   seed?: number;
