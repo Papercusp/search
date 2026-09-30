@@ -127,4 +127,43 @@ export {
   type StoredRowSelfCheckDeps,
   type StoredRowSelfCheckResult,
 } from './embedding-space-self-check';
+export {
+  DEFAULT_COVERAGE_THRESHOLDS,
+  assessSurfaceCoverage,
+  buildCoverageCountQuery,
+  buildCoverageSnapshot,
+  createCoverageGate,
+  measureSurfaceCoverage,
+  summarizeCoverage,
+  toSurfaceReading,
+  type CoverageCountQuery,
+  type CoverageGate,
+  type CoverageGateConfig,
+  type CoverageSample,
+  type CoverageSnapshot,
+  type CoverageSqlHandle,
+  type CoverageSurfaceSpec,
+  type CoverageThresholds,
+  type CoverageVerdict,
+  type SearchCoverageReport,
+  type SourceCoverageAssessment,
+  type SurfaceReading,
+} from './coverage-gate';
+export {
+  DEFAULT_BACKGROUND_SAMPLE_LIMIT,
+  DEFAULT_MAX_CALIBRATED_CUT,
+  DEFAULT_MIN_BACKGROUND_SAMPLES,
+  DEFAULT_NEAR_DUPLICATE_QUANTILE,
+  DEFAULT_SIMILARITY_DECIMALS,
+  calibrateNearDuplicateCut,
+  checkNearDuplicates,
+  nearestRankQuantile,
+  type CalibrateCutOptions,
+  type DroppedNearDuplicateCandidate,
+  type NearDuplicateCalibration,
+  type NearDuplicateCandidate,
+  type NearDuplicateCheck,
+  type NearDuplicateOutcome,
+} from './near-duplicate';
+export * from './backfill/index';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';
