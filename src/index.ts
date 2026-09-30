@@ -105,4 +105,26 @@ export {
 } from './chunk';
 export * from './chunks/index';
 export { withIterativeScan, resetIterativeScanProbe } from './hnsw-iterative-scan';
+export {
+  createEmbeddingSpace,
+  PGVECTOR_INDEX_OPERATOR_CLASS,
+  type ColumnWidthSkew,
+  type EmbeddingDistanceMetric,
+  type EmbeddingProfileSpec,
+  type EmbeddingSpace,
+  type EmbeddingSpaceConfig,
+  type EmbeddingSpaceSelection,
+  type EmbeddingStorageContract,
+} from './embedding-space';
+export {
+  DEFAULT_DESYNC_DISTANCE_THRESHOLD,
+  cosineDistance,
+  isEmbeddingDesync,
+  parseVectorText,
+  runStoredRowSelfCheck,
+  type SelfCheckCanary,
+  type SelfCheckReading,
+  type StoredRowSelfCheckDeps,
+  type StoredRowSelfCheckResult,
+} from './embedding-space-self-check';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';
