@@ -1,0 +1,171 @@
+{
+  "provenance": "Expected outputs were produced by papercusp's PRE-MOVE plans classifier (confirmSimilarPlans in packages/operator-core/lib/agent-tools/plans/semantic-dedup.ts, before P-004 moved the cut into this library), run on these inputs on 2026-09-30 by .papercusp/scratch/rag-carry/p004-gen-cases.mts. quantile maps to PAPERCUSP_PLAN_DUPE_QUANTILE and absoluteOverride to PAPERCUSP_PLAN_DUPE_CONFIRM on the host side. Similarities in expected are rounded to 3 decimals, as the host reports them.",
+  "generator": "background: { seed, n, lo, hi } is n draws of mulberry32(seed) mapped to lo + (hi - lo) * r and rounded to 1e-6; { n, constant } is n copies of constant; extra entries are appended via Number() ('NaN', 'Infinity', '-Infinity').",
+  "cases": [
+    {
+      "name": "spread-256-q95-boundaries",
+      "background": { "seed": 20260930, "n": 256, "lo": 0.635, "hi": 0.837 },
+      "candidates": [
+        { "key": "far-above", "similarity": 0.93 },
+        { "key": "at-cut", "similarity": 0.827627 },
+        { "key": "just-below-cut", "similarity": 0.827626999 },
+        { "key": "no-vector", "similarity": null },
+        { "key": "far-below", "similarity": 0.61 },
+        { "key": "just-above-cut", "similarity": 0.827627001 }
+      ],
+      "expected": {
+        "verdict": true,
+        "calibration": { "basis": "corpus-relative", "cut": 0.827627, "backgroundSamples": 256, "quantile": 0.95 },
+        "kept": [
+          { "key": "far-above", "similarity": 0.93 },
+          { "key": "at-cut", "similarity": 0.828 },
+          { "key": "no-vector" },
+          { "key": "just-above-cut", "similarity": 0.828 }
+        ],
+        "dropped": [
+          { "key": "just-below-cut", "similarity": 0.828 },
+          { "key": "far-below", "similarity": 0.61 }
+        ],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["far-above", "at-cut", "just-below-cut", "no-vector", "far-below", "just-above-cut"]
+      }
+    },
+    {
+      "name": "spread-256-q90",
+      "background": { "seed": 20260930, "n": 256, "lo": 0.635, "hi": 0.837 },
+      "quantile": 0.9,
+      "candidates": [
+        { "key": "between-q90-and-q95", "similarity": 0.8238135 },
+        { "key": "at-q90", "similarity": 0.82 },
+        { "key": "below-q90", "similarity": 0.8099999999999999 }
+      ],
+      "expected": {
+        "verdict": true,
+        "calibration": { "basis": "corpus-relative", "cut": 0.82, "backgroundSamples": 256, "quantile": 0.9 },
+        "kept": [
+          { "key": "between-q90-and-q95", "similarity": 0.824 },
+          { "key": "at-q90", "similarity": 0.82 }
+        ],
+        "dropped": [{ "key": "below-q90", "similarity": 0.81 }],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["between-q90-and-q95", "at-q90", "below-q90"]
+      }
+    },
+    {
+      "name": "min-samples-exactly-32",
+      "background": { "seed": 7, "n": 32, "lo": 0.6, "hi": 0.9 },
+      "candidates": [
+        { "key": "at-cut", "similarity": 0.893072 },
+        { "key": "below", "similarity": 0.892572 }
+      ],
+      "expected": {
+        "verdict": true,
+        "calibration": { "basis": "corpus-relative", "cut": 0.893072, "backgroundSamples": 32, "quantile": 0.95 },
+        "kept": [{ "key": "at-cut", "similarity": 0.893 }],
+        "dropped": [{ "key": "below", "similarity": 0.893 }],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["at-cut", "below"]
+      }
+    },
+    {
+      "name": "below-min-samples-31",
+      "background": { "seed": 7, "n": 31, "lo": 0.6, "hi": 0.9 },
+      "candidates": [
+        { "key": "high", "similarity": 0.99 },
+        { "key": "low", "similarity": 0.1 }
+      ],
+      "expected": {
+        "verdict": false,
+        "calibration": null,
+        "kept": [{ "key": "high" }, { "key": "low" }],
+        "dropped": [],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["high", "low"]
+      }
+    },
+    {
+      "name": "non-finite-background-values-ignored",
+      "background": { "seed": 11, "n": 40, "lo": 0.62, "hi": 0.86, "extra": ["NaN", "Infinity", "-Infinity"] },
+      "candidates": [
+        { "key": "at-cut", "similarity": 0.824186 },
+        { "key": "below", "similarity": 0.823186 }
+      ],
+      "expected": {
+        "verdict": true,
+        "calibration": { "basis": "corpus-relative", "cut": 0.824186, "backgroundSamples": 40, "quantile": 0.95 },
+        "kept": [{ "key": "at-cut", "similarity": 0.824 }],
+        "dropped": [{ "key": "below", "similarity": 0.823 }],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["at-cut", "below"]
+      }
+    },
+    {
+      "name": "degenerate-background-cut-above-max",
+      "background": { "n": 64, "constant": 0.99 },
+      "candidates": [
+        { "key": "a", "similarity": 0.995 },
+        { "key": "b", "similarity": 0.2 }
+      ],
+      "expected": {
+        "verdict": false,
+        "calibration": null,
+        "kept": [{ "key": "a" }, { "key": "b" }],
+        "dropped": [],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["a", "b"]
+      }
+    },
+    {
+      "name": "zero-background-cut-not-positive",
+      "background": { "n": 64, "constant": 0 },
+      "candidates": [{ "key": "a", "similarity": 0.5 }],
+      "expected": {
+        "verdict": false,
+        "calibration": null,
+        "kept": [{ "key": "a" }],
+        "dropped": [],
+        "backgroundRead": true,
+        "backgroundLimit": 256,
+        "backgroundExclude": ["a"]
+      }
+    },
+    {
+      "name": "absolute-override-0.7-skips-background",
+      "background": { "seed": 20260930, "n": 256, "lo": 0.635, "hi": 0.837 },
+      "absoluteOverride": 0.7,
+      "candidates": [
+        { "key": "at-override", "similarity": 0.7 },
+        { "key": "below-override", "similarity": 0.6999 },
+        { "key": "no-vector", "similarity": null }
+      ],
+      "expected": {
+        "verdict": true,
+        "calibration": { "basis": "absolute-override", "cut": 0.7, "backgroundSamples": 0 },
+        "kept": [
+          { "key": "at-override", "similarity": 0.7 },
+          { "key": "no-vector" }
+        ],
+        "dropped": [{ "key": "below-override", "similarity": 0.7 }],
+        "backgroundRead": false
+      }
+    },
+    {
+      "name": "no-candidates",
+      "background": { "seed": 20260930, "n": 256, "lo": 0.635, "hi": 0.837 },
+      "candidates": [],
+      "expected": {
+        "verdict": false,
+        "calibration": null,
+        "kept": [],
+        "dropped": [],
+        "backgroundRead": false
+      }
+    }
+  ]
+}
