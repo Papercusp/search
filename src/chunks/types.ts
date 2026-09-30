@@ -105,6 +105,31 @@ export interface ChunkVectorTable {
   modeColumn?: string | null;
 }
 
+/**
+ * Where a host's embed sweep finds a store's chunks and what it embeds for each
+ * one. A store declares it, so the sweep target is DERIVED from the registry
+ * (chunkEmbedTargets) instead of being listed by hand per chunk table.
+ * Column names are unaliased columns of `table`.
+ */
+export interface ChunkEmbedTarget {
+  /** Schema-qualified chunk table. */
+  table: string;
+  /** The chunk row's primary-key columns, in order. */
+  keyColumns: readonly string[];
+  /** The vector column the sweep fills; NULL means not yet embedded. */
+  embeddingColumn: string;
+  /**
+   * SQL over the chunk row for the exact text to embed. It must equal
+   * embeddedChunkText(header, content) row for row, because chunk_sha hashes
+   * that text and a re-split reuses a vector by chunk_sha.
+   */
+  embeddedTextSql: string;
+  /** Column recording which embedder produced the vector; null = absent. */
+  modeColumn: string | null;
+  /** Column recording the embedding profile; null = absent. */
+  profileColumn: string | null;
+}
+
 /** A surface after validation, with its defaults applied. */
 export interface ResolvedChunkSurface extends ChunkSurface {
   minChars: number;
@@ -176,6 +201,8 @@ export interface ChunkStore {
   readonly name: string;
   /** Where the chunk-aware vector leg reads this store's vectors. Absent = not queryable. */
   readonly queryTable?: ChunkVectorTable;
+  /** Where a host's embed sweep finds this store's unembedded chunks. Absent = the host embeds it by other means. */
+  readonly embedTarget?: ChunkEmbedTarget;
   /** Run fn in one transaction (a parent's delete + insert must be atomic). */
   transaction<T>(sql: Sql, fn: (tx: Sql) => Promise<T>): Promise<T>;
   /**

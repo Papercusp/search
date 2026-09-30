@@ -55,6 +55,14 @@ function keyMatchesChunk(surface: ResolvedChunkSurface, chunkAlias: string): str
     .join(' AND ');
 }
 
+/**
+ * SQL form of engine.embeddedChunkText over a shared chunk row: `header\ncontent`,
+ * or content alone when the header is NULL or empty. It must stay byte-identical
+ * to embeddedChunkText, since chunk_sha hashes that text and a re-split reuses a
+ * vector by chunk_sha. A host may wrap it (e.g. left(…, n)) to fit its embedder.
+ */
+export const SHARED_CHUNK_EMBEDDED_TEXT_SQL = `concat_ws(E'\\n', nullif(header, ''), content)`;
+
 /** SQL form of engine.parentShaOf — must stay byte-identical to it. */
 export function parentShaSql(textExpr: string, headerExpr: string): string {
   return `encode(sha256(convert_to(CASE WHEN nullif(${headerExpr}, '') IS NULL THEN ${textExpr} ELSE ${headerExpr} || chr(31) || ${textExpr} END, 'UTF8')), 'hex')`;
@@ -67,6 +75,14 @@ export function sharedChunkStore(opts: SharedChunkStoreOptions = {}): ChunkStore
   return {
     name: table,
     queryTable: { table, keying: 'shared' },
+    embedTarget: {
+      table,
+      keyColumns: ['surface', 'parent_key', 'chunk_idx'],
+      embeddingColumn: 'embedding',
+      embeddedTextSql: SHARED_CHUNK_EMBEDDED_TEXT_SQL,
+      modeColumn: 'embedding_mode',
+      profileColumn: 'embedding_profile',
+    },
 
     async transaction(sql, fn) {
       return (await sql.begin((tx) => fn(tx as unknown as Sql))) as Awaited<ReturnType<typeof fn>>;
