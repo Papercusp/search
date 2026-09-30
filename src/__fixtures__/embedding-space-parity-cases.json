@@ -1,0 +1,3459 @@
+{
+  "provenance": "Expected outputs were produced by papercusp's PRE-MOVE functions in packages/operator-core/lib/search/prose-vector-dims.ts (and the module-private proseProfileSql in agent-tools/search/sources.ts, reproduced in embedding-space-parity-cases.ts) before P-001 moved them into @papercusp/search. SQL is rendered with a recording tag: $n placeholders, whitespace collapsed. Regenerate with packages/operator-core/lib/search/embedding-space-parity-gen-cli.ts.",
+  "hostConfig": {
+    "storageLabel": "shared prose storage",
+    "storage": {
+      "acceptedProfileIds": [
+        "gemma-embeddinggemma-300m-768@v1",
+        "openai-text-embedding-3-small-768@v1"
+      ],
+      "dimensions": 768,
+      "distanceMetric": "cosine",
+      "indexOperatorClass": "vector_cosine_ops"
+    },
+    "legacyModes": {
+      "gemma": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "openai": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      }
+    }
+  },
+  "census": [
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/agent-tools/plans/semantic-dedup.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/agent-tools/plans/semantic-dedup.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/agent-tools/plans/semantic-leg.ts",
+      "args": "profileColumn | modeColumn",
+      "literal": null
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "profileColumn | modeColumn",
+      "literal": null
+    },
+    {
+      "fn": "proseProfileSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "'body_embedding_profile' | 'body_embedding_mode'",
+      "literal": {
+        "profileColumn": "body_embedding_profile",
+        "modeColumn": "body_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfileSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "'body_embedding_profile' | 'body_embedding_mode'",
+      "literal": {
+        "profileColumn": "body_embedding_profile",
+        "modeColumn": "body_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfileSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "'content_embedding_profile' | 'content_embedding_mode'",
+      "literal": {
+        "profileColumn": "content_embedding_profile",
+        "modeColumn": "content_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfileSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "cols.profileColumn | cols.modeColumn",
+      "literal": null
+    },
+    {
+      "fn": "proseProfileSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "cols.profileColumn | cols.modeColumn",
+      "literal": null
+    },
+    {
+      "fn": "proseProfileSql",
+      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
+      "args": "cols.profileColumn | cols.modeColumn",
+      "literal": null
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/agent-tools/work_items/semantic-dupe-guard.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/code-recipes-search.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/consult/get-feedback-core.ts",
+      "args": "'query_embedding_profile' | 'query_embedding_mode'",
+      "literal": {
+        "profileColumn": "query_embedding_profile",
+        "modeColumn": "query_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/consult/peers-know.ts",
+      "args": "cols.profileColumn | cols.modeColumn",
+      "literal": null
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/consult/relevance-router.ts",
+      "args": "'text_embedding_profile' | 'text_embedding_mode'",
+      "literal": {
+        "profileColumn": "text_embedding_profile",
+        "modeColumn": "text_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/datatype-registry-store.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/datatype-registry-store.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/events/await/interest-watch.ts",
+      "args": "'text_embedding_profile' | 'text_embedding_mode'",
+      "literal": {
+        "profileColumn": "text_embedding_profile",
+        "modeColumn": "text_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/harness/routines/loop-wake-recipe.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/personal-vault/store.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/scout/digest-embed-cluster-leg.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/scout/intent-rank-leg.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/scout/intent-rank-leg.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/scout/semantic-novelty-leg.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/scout/semantic-novelty-leg.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/scout/semantic-novelty-leg.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/doc-section-overlap.ts",
+      "args": "'d.embedding_profile' | 'd.embedding_mode'",
+      "literal": {
+        "profileColumn": "d.embedding_profile",
+        "modeColumn": "d.embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/doc-section-overlap.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/doc-section-overlap.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/doc-section-overlap.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/doc-section-overlap.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/work-items-admission-census.ts",
+      "args": "'wi.embedding_profile' | 'wi.embedding_mode'",
+      "literal": {
+        "profileColumn": "wi.embedding_profile",
+        "modeColumn": "wi.embedding_mode"
+      }
+    },
+    {
+      "fn": "effectiveStoredProseProfileIdSql",
+      "file": "packages/operator-core/lib/work-items-admission-promoter.ts",
+      "args": "'p.embedding_profile' | 'p.embedding_mode'",
+      "literal": {
+        "profileColumn": "p.embedding_profile",
+        "modeColumn": "p.embedding_mode"
+      }
+    },
+    {
+      "fn": "effectiveStoredProseProfileIdSql",
+      "file": "packages/operator-core/lib/work-items-admission-promoter.ts",
+      "args": "'p.embedding_profile' | 'p.embedding_mode'",
+      "literal": {
+        "profileColumn": "p.embedding_profile",
+        "modeColumn": "p.embedding_mode"
+      }
+    },
+    {
+      "fn": "effectiveStoredProseProfileIdSql",
+      "file": "packages/operator-core/lib/work-items-admission-promoter.ts",
+      "args": "'wi.embedding_profile' | 'wi.embedding_mode'",
+      "literal": {
+        "profileColumn": "wi.embedding_profile",
+        "modeColumn": "wi.embedding_mode"
+      }
+    },
+    {
+      "fn": "effectiveStoredProseProfileIdSql",
+      "file": "packages/operator-core/lib/work-items-admission-promoter.ts",
+      "args": "'wi.embedding_profile' | 'wi.embedding_mode'",
+      "literal": {
+        "profileColumn": "wi.embedding_profile",
+        "modeColumn": "wi.embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/work-items.ts",
+      "args": "profile | mode",
+      "literal": null
+    }
+  ],
+  "columnPairs": [
+    {
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "from": [
+        "proseProfileSql@packages/operator-core/lib/agent-tools/search/sources.ts"
+      ]
+    },
+    {
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "from": [
+        "spaceFilter@chunk-surface:consult_questions",
+        "spaceFilter@chunk-surface:operator_turns",
+        "spaceFilter@chunk-surface:plans",
+        "spaceFilter@chunk-surface:session_turns",
+        "spaceFilter@chunk-surface:work_items"
+      ]
+    },
+    {
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "from": [
+        "proseProfileSql@packages/operator-core/lib/agent-tools/search/sources.ts"
+      ]
+    },
+    {
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "from": [
+        "proseProfilePredicateSql@packages/operator-core/lib/search/doc-section-overlap.ts"
+      ]
+    },
+    {
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "from": [
+        "proseProfilePredicateSql@packages/operator-core/lib/agent-tools/plans/semantic-dedup.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/agent-tools/work_items/semantic-dupe-guard.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/code-recipes-search.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/datatype-registry-store.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/harness/routines/loop-wake-recipe.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/personal-vault/store.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/scout/digest-embed-cluster-leg.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/scout/intent-rank-leg.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/scout/semantic-novelty-leg.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/search/doc-section-overlap.ts"
+      ]
+    },
+    {
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "from": [
+        "effectiveStoredProseProfileIdSql@packages/operator-core/lib/work-items-admission-promoter.ts",
+        "spaceFilter@chunk-surface:plans",
+        "spaceFilter@chunk-surface:work_items"
+      ]
+    },
+    {
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "from": [
+        "spaceFilter@chunk-surface:consult_questions"
+      ]
+    },
+    {
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "from": [
+        "spaceFilter@chunk-surface:operator_turns",
+        "spaceFilter@chunk-surface:session_turns"
+      ]
+    },
+    {
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "from": [
+        "proseProfilePredicateSql@packages/operator-core/lib/consult/get-feedback-core.ts"
+      ]
+    },
+    {
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "from": [
+        "proseProfilePredicateSql@packages/operator-core/lib/consult/relevance-router.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/events/await/interest-watch.ts"
+      ]
+    },
+    {
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "from": [
+        "effectiveStoredProseProfileIdSql@packages/operator-core/lib/work-items-admission-promoter.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/work-items-admission-census.ts"
+      ]
+    }
+  ],
+  "predicate": [
+    {
+      "selection": null,
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "(body_embedding_profile = $1 OR (body_embedding_profile IS NULL AND body_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "(body_embedding_profile = $1 OR (body_embedding_profile IS NULL AND body_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "body_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "body_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "(c.embedding_profile = $1 OR (c.embedding_profile IS NULL AND c.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "(c.embedding_profile = $1 OR (c.embedding_profile IS NULL AND c.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "c.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "c.embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "(content_embedding_profile = $1 OR (content_embedding_profile IS NULL AND content_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "(content_embedding_profile = $1 OR (content_embedding_profile IS NULL AND content_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "content_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "content_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "(d.embedding_profile = $1 OR (d.embedding_profile IS NULL AND d.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "(d.embedding_profile = $1 OR (d.embedding_profile IS NULL AND d.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "d.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "d.embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "(embedding_profile = $1 OR (embedding_profile IS NULL AND embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "(embedding_profile = $1 OR (embedding_profile IS NULL AND embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "(p.embedding_profile = $1 OR (p.embedding_profile IS NULL AND p.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "(p.embedding_profile = $1 OR (p.embedding_profile IS NULL AND p.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "p.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "p.embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "(p.query_embedding_profile = $1 OR (p.query_embedding_profile IS NULL AND p.query_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "(p.query_embedding_profile = $1 OR (p.query_embedding_profile IS NULL AND p.query_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "p.query_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "p.query_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "(p.text_embedding_profile = $1 OR (p.text_embedding_profile IS NULL AND p.text_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "(p.text_embedding_profile = $1 OR (p.text_embedding_profile IS NULL AND p.text_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "p.text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "p.text_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "(query_embedding_profile = $1 OR (query_embedding_profile IS NULL AND query_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "(query_embedding_profile = $1 OR (query_embedding_profile IS NULL AND query_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "query_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "query_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "(text_embedding_profile = $1 OR (text_embedding_profile IS NULL AND text_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "(text_embedding_profile = $1 OR (text_embedding_profile IS NULL AND text_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "text_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "(wi.embedding_profile = $1 OR (wi.embedding_profile IS NULL AND wi.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "(wi.embedding_profile = $1 OR (wi.embedding_profile IS NULL AND wi.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "wi.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "wi.embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    }
+  ],
+  "sourceFilter": [
+    {
+      "embeddingProfile": null,
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "(body_embedding_profile = $1 OR (body_embedding_profile IS NULL AND body_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "(body_embedding_profile = $1 OR (body_embedding_profile IS NULL AND body_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "body_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "body_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "(c.embedding_profile = $1 OR (c.embedding_profile IS NULL AND c.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "(c.embedding_profile = $1 OR (c.embedding_profile IS NULL AND c.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "c.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "c.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "(content_embedding_profile = $1 OR (content_embedding_profile IS NULL AND content_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "(content_embedding_profile = $1 OR (content_embedding_profile IS NULL AND content_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "content_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "content_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "(d.embedding_profile = $1 OR (d.embedding_profile IS NULL AND d.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "(d.embedding_profile = $1 OR (d.embedding_profile IS NULL AND d.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "d.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "d.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "(embedding_profile = $1 OR (embedding_profile IS NULL AND embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "(embedding_profile = $1 OR (embedding_profile IS NULL AND embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "(p.embedding_profile = $1 OR (p.embedding_profile IS NULL AND p.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "(p.embedding_profile = $1 OR (p.embedding_profile IS NULL AND p.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "p.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "p.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "(p.query_embedding_profile = $1 OR (p.query_embedding_profile IS NULL AND p.query_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "(p.query_embedding_profile = $1 OR (p.query_embedding_profile IS NULL AND p.query_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "p.query_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "p.query_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "(p.text_embedding_profile = $1 OR (p.text_embedding_profile IS NULL AND p.text_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "(p.text_embedding_profile = $1 OR (p.text_embedding_profile IS NULL AND p.text_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "p.text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "p.text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "(query_embedding_profile = $1 OR (query_embedding_profile IS NULL AND query_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "(query_embedding_profile = $1 OR (query_embedding_profile IS NULL AND query_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "query_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "query_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "(text_embedding_profile = $1 OR (text_embedding_profile IS NULL AND text_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "(text_embedding_profile = $1 OR (text_embedding_profile IS NULL AND text_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "(wi.embedding_profile = $1 OR (wi.embedding_profile IS NULL AND wi.embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "(wi.embedding_profile = $1 OR (wi.embedding_profile IS NULL AND wi.embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "wi.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "wi.embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    }
+  ],
+  "effectiveStored": [
+    {
+      "profileColumn": "body_embedding_profile",
+      "modeColumn": "body_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN body_embedding_profile = ANY($1::text[]) THEN body_embedding_profile WHEN body_embedding_profile IS NULL THEN CASE WHEN body_embedding_mode = 'gemma' THEN $2 WHEN body_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "c.embedding_profile",
+      "modeColumn": "c.embedding_mode",
+      "expected": {
+        "text": "CASE WHEN c.embedding_profile = ANY($1::text[]) THEN c.embedding_profile WHEN c.embedding_profile IS NULL THEN CASE WHEN c.embedding_mode = 'gemma' THEN $2 WHEN c.embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "content_embedding_profile",
+      "modeColumn": "content_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN content_embedding_profile = ANY($1::text[]) THEN content_embedding_profile WHEN content_embedding_profile IS NULL THEN CASE WHEN content_embedding_mode = 'gemma' THEN $2 WHEN content_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "d.embedding_profile",
+      "modeColumn": "d.embedding_mode",
+      "expected": {
+        "text": "CASE WHEN d.embedding_profile = ANY($1::text[]) THEN d.embedding_profile WHEN d.embedding_profile IS NULL THEN CASE WHEN d.embedding_mode = 'gemma' THEN $2 WHEN d.embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "embedding_profile",
+      "modeColumn": "embedding_mode",
+      "expected": {
+        "text": "CASE WHEN embedding_profile = ANY($1::text[]) THEN embedding_profile WHEN embedding_profile IS NULL THEN CASE WHEN embedding_mode = 'gemma' THEN $2 WHEN embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "p.embedding_profile",
+      "modeColumn": "p.embedding_mode",
+      "expected": {
+        "text": "CASE WHEN p.embedding_profile = ANY($1::text[]) THEN p.embedding_profile WHEN p.embedding_profile IS NULL THEN CASE WHEN p.embedding_mode = 'gemma' THEN $2 WHEN p.embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "p.query_embedding_profile",
+      "modeColumn": "p.query_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN p.query_embedding_profile = ANY($1::text[]) THEN p.query_embedding_profile WHEN p.query_embedding_profile IS NULL THEN CASE WHEN p.query_embedding_mode = 'gemma' THEN $2 WHEN p.query_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "p.text_embedding_profile",
+      "modeColumn": "p.text_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN p.text_embedding_profile = ANY($1::text[]) THEN p.text_embedding_profile WHEN p.text_embedding_profile IS NULL THEN CASE WHEN p.text_embedding_mode = 'gemma' THEN $2 WHEN p.text_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "query_embedding_profile",
+      "modeColumn": "query_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN query_embedding_profile = ANY($1::text[]) THEN query_embedding_profile WHEN query_embedding_profile IS NULL THEN CASE WHEN query_embedding_mode = 'gemma' THEN $2 WHEN query_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "text_embedding_profile",
+      "modeColumn": "text_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN text_embedding_profile = ANY($1::text[]) THEN text_embedding_profile WHEN text_embedding_profile IS NULL THEN CASE WHEN text_embedding_mode = 'gemma' THEN $2 WHEN text_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "wi.embedding_profile",
+      "modeColumn": "wi.embedding_mode",
+      "expected": {
+        "text": "CASE WHEN wi.embedding_profile = ANY($1::text[]) THEN wi.embedding_profile WHEN wi.embedding_profile IS NULL THEN CASE WHEN wi.embedding_mode = 'gemma' THEN $2 WHEN wi.embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    }
+  ],
+  "compatibility": [
+    {
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": [
+        "shared prose storage does not accept profile local-bge-small-en-v1.5@v1; accepted=gemma-embeddinggemma-300m-768@v1,openai-text-embedding-3-small-768@v1",
+        "shared prose storage has 768 dimensions; profile local-bge-small-en-v1.5@v1 emits 384"
+      ]
+    },
+    {
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": []
+    },
+    {
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": []
+    },
+    {
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": [
+        "shared prose storage does not accept profile harrier-oss-v1-0.6b-1024@v1; accepted=gemma-embeddinggemma-300m-768@v1,openai-text-embedding-3-small-768@v1",
+        "shared prose storage has 768 dimensions; profile harrier-oss-v1-0.6b-1024@v1 emits 1024"
+      ]
+    },
+    {
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": [
+        "shared prose storage has 768 dimensions; profile gemma-embeddinggemma-300m-768@v1 emits 1024"
+      ]
+    },
+    {
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": [
+        "shared prose storage uses cosine; profile gemma-embeddinggemma-300m-768@v1 requires l2"
+      ]
+    },
+    {
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": [
+        "shared prose storage does not accept profile unknown-model@v1; accepted=gemma-embeddinggemma-300m-768@v1,openai-text-embedding-3-small-768@v1"
+      ]
+    }
+  ],
+  "resolveSelection": [
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": null
+    },
+    {
+      "mode": "local",
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      }
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": null
+    },
+    {
+      "mode": "openai",
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      }
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": null
+    },
+    {
+      "mode": "gemma",
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": null
+    },
+    {
+      "mode": "harrier",
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": null
+    },
+    {
+      "mode": "constructor",
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "dimensions": 384,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "harrier-oss-v1-0.6b-1024@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 1024,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "dimensions": 768,
+        "distanceMetric": "l2"
+      },
+      "expected": null
+    },
+    {
+      "mode": "",
+      "profile": {
+        "profileId": "unknown-model@v1",
+        "dimensions": 768,
+        "distanceMetric": "cosine"
+      },
+      "expected": null
+    }
+  ],
+  "resolveCurrent": [
+    {
+      "mode": "local",
+      "expected": null
+    },
+    {
+      "mode": "openai",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      }
+    },
+    {
+      "mode": "gemma",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      }
+    },
+    {
+      "mode": "harrier",
+      "expected": null
+    },
+    {
+      "mode": "constructor",
+      "expected": null
+    },
+    {
+      "mode": "",
+      "expected": null
+    }
+  ],
+  "resolveProfileId": [
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": "local",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": "openai",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": "gemma",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      }
+    },
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": "harrier",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": "constructor",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": "",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "legacyMode": null,
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": "local",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": "openai",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": "gemma",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": "harrier",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": "constructor",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": "",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "legacyMode": null,
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      }
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": "local",
+      "expected": null
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": "openai",
+      "expected": null
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": "gemma",
+      "expected": null
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": "harrier",
+      "expected": null
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": "constructor",
+      "expected": null
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": "",
+      "expected": null
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "legacyMode": null,
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": "local",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": "openai",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": "gemma",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": "harrier",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": "constructor",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": "",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "legacyMode": null,
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": "local",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": "openai",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": "gemma",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": "harrier",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": "constructor",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": "",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "legacyMode": null,
+      "expected": null
+    }
+  ],
+  "resolveAccepted": [
+    {
+      "profileId": "gemma-embeddinggemma-300m-768@v1",
+      "expected": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      }
+    },
+    {
+      "profileId": "openai-text-embedding-3-small-768@v1",
+      "expected": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      }
+    },
+    {
+      "profileId": "local-bge-small-en-v1.5@v1",
+      "expected": null
+    },
+    {
+      "profileId": "harrier-oss-v1-0.6b-1024@v1",
+      "expected": null
+    },
+    {
+      "profileId": "unknown-model@v1",
+      "expected": null
+    }
+  ],
+  "identity": [
+    {
+      "stored": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": "openai-text-embedding-3-small-768@v1"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": "openai-text-embedding-3-small-768@v1"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "profileId": "openai-text-embedding-3-small-768@v1"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": "openai-text-embedding-3-small-768@v1"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "openai"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "openai"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "openai"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "openai"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "local"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "local"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "local"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "profileId": null,
+        "mode": "local"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": true
+    },
+    {
+      "stored": {
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {
+        "mode": "gemma"
+      },
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {},
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "expected": false
+    },
+    {
+      "stored": {},
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "expected": false
+    },
+    {
+      "stored": {},
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    },
+    {
+      "stored": {},
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "expected": false
+    }
+  ],
+  "fits": [
+    {
+      "dims": 384,
+      "expected": false
+    },
+    {
+      "dims": 768,
+      "expected": true
+    },
+    {
+      "dims": 1024,
+      "expected": false
+    },
+    {
+      "dims": 0,
+      "expected": false
+    }
+  ],
+  "widthSkew": {
+    "measured": [
+      {
+        "table": "harness_shared.a",
+        "column": "embedding",
+        "dims": 768
+      },
+      {
+        "table": "harness_shared.b",
+        "column": "embedding",
+        "dims": 1024
+      },
+      {
+        "table": "harness_shared.c",
+        "column": "embedding",
+        "dims": 384
+      },
+      {
+        "table": "harness_shared.d",
+        "column": "embedding",
+        "dims": 0
+      },
+      {
+        "table": "harness_shared.e",
+        "column": "embedding",
+        "dims": -1
+      }
+    ],
+    "expected": [
+      {
+        "table": "harness_shared.b",
+        "column": "embedding",
+        "liveDims": 1024,
+        "declaredDims": 768
+      },
+      {
+        "table": "harness_shared.c",
+        "column": "embedding",
+        "liveDims": 384,
+        "declaredDims": 768
+      }
+    ]
+  }
+}
