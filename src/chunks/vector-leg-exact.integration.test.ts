@@ -93,7 +93,7 @@ describe("chunkAwareVectorLegSql scan:'exact' (D-032)", () => {
     });
 
   const run = (mode: ChunkLegMode, scan: ChunkLegScan, limit: number) =>
-    withIterativeScan(sql as never, (tx: never) => legSql(tx, mode, scan, limit) as never) as unknown as Promise<
+    withIterativeScan(sql as never, (tx) => legSql(tx as never, mode, scan, limit) as never) as unknown as Promise<
       Array<{ id: number; distance: number; matched_anchor: string | null }>
     >;
 
