@@ -249,6 +249,33 @@ describe('syncChunkSurfaces', () => {
     expect(after[2]!.embedding).toBe(before.get(2));
   });
 
+  it("R-11: appending to a window-split parent keeps every unchanged window's embedding", async () => {
+    // Varied, whitespace-free text so every window is distinct: a reused
+    // embedding can only come from an identical window, never from a
+    // look-alike one.
+    const text = (n: number) => Array.from({ length: n }, (_, i) => String.fromCharCode(97 + ((i * 7 + (i >> 3)) % 26))).join('');
+    const store = new FakeStore('notes');
+    store.put({ key: ['1'], text: text(250), version: t(1) });
+    await run(store, windowSurface());
+    store.embedAll();
+    const before = store.chunks.get(store.id(['1']))!.map((x) => ({ content: x.content, embedding: x.embedding }));
+    expect(store.unembedded()).toBe(0);
+
+    store.put({ key: ['1'], text: text(350), version: t(2) });
+    const { stats } = await run(store, windowSurface());
+
+    const after = store.chunks.get(store.id(['1']))!;
+    expect(after.length).toBeGreaterThan(before.length);
+    // Every window whose text the append did not touch keeps its embedding
+    // object; every window it did touch (the old tail, re-cut, and the new
+    // ones) is left for the embed sweep.
+    const unchanged = after.filter((x) => before.some((b) => b.content === x.content));
+    expect(unchanged.length).toBe(before.length - 1);
+    for (const x of unchanged) expect(x.embedding).toBe(before.find((b) => b.content === x.content)!.embedding);
+    expect(after.filter((x) => x.embedding === null).length).toBe(after.length - unchanged.length);
+    expect(stats).toMatchObject({ parentsSynced: 1, chunksWritten: after.length, embeddingsReused: unchanged.length, errors: 0 });
+  });
+
   it('a version bump with unchanged text only advances the stored version', async () => {
     const store = new FakeStore('notes');
     store.put({ key: ['1'], text: 'y'.repeat(150), version: t(1) });
