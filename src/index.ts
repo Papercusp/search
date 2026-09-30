@@ -104,4 +104,5 @@ export {
   type MarkdownSection,
 } from './chunk';
 export * from './chunks/index';
+export { withIterativeScan, resetIterativeScanProbe } from './hnsw-iterative-scan';
 export { rrfCombine, RRF_K_DEFAULT, type RankedItem, type FusedItem } from '@papercusp/rrf';
