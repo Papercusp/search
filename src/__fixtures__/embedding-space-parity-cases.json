@@ -50,12 +50,6 @@
       "literal": null
     },
     {
-      "fn": "proseProfilePredicateSql",
-      "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
-      "args": "profileColumn | modeColumn",
-      "literal": null
-    },
-    {
       "fn": "proseProfileSql",
       "file": "packages/operator-core/lib/agent-tools/search/sources.ts",
       "args": "'body_embedding_profile' | 'body_embedding_mode'",
