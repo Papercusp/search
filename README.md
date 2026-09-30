@@ -134,9 +134,202 @@ no other code registers `notes` exactly like this and checks the whole path end
 to end. Run it with `npm run test:integration` (it starts a throwaway Postgres
 from the local binaries, or uses `SEARCH_TEST_PG_URL`).
 
+## Embedding-space safety
+
+A vector can only be compared with vectors made by the same model, text
+recipe and width. Nothing about a wrong-space vector looks wrong: the query
+still returns neighbours, and they are noise. `createEmbeddingSpace` takes the
+host's storage contract and returns the filters every query and every write
+goes through.
+
+```ts
+import { createEmbeddingSpace } from '@papercusp/search';
+
+const space = createEmbeddingSpace({
+  storage: {
+    acceptedProfileIds: ['notes-embedder@384'],
+    dimensions: 384,
+    distanceMetric: 'cosine',
+    indexOperatorClass: 'vector_cosine_ops',
+  },
+  // Rows written before profile ids were recorded: mode label -> the profile it means now.
+  legacyModes: { local: { profileId: 'notes-embedder@384', dimensions: 384, distanceMetric: 'cosine' } },
+});
+
+space.validateCompatibility(profile);            // [] means this embedder's output fits the columns
+const selection = space.resolveSelection('local', profile); // null when storage refuses it
+await sql`SELECT id FROM app.notes
+          WHERE ${space.predicateSql(sql, selection, 'embedding_profile', 'embedding_mode')}`;
+```
+
+Rows carry two label columns beside the vector. `<col>_profile` holds the exact
+profile id and is authoritative when present. `<col>_mode` is an older, coarser
+label: a row with only a mode is read through that mode's declared current
+profile and nothing else, so an equal width or an equal mode never makes a
+different profile compatible.
+
+Every filter fails closed. A missing or unknown selection compiles to SQL
+`FALSE`, never to a mode-only match. `sourceFilterSql` is the version a
+`SearchSource` applies to its vector leg. `computeColumnWidthSkew` compares the
+live width of each vector column (pgvector's `pg_attribute.atttypmod`) with the
+declared one.
+
+`runStoredRowSelfCheck({ embed, pickCanary, alert, clear? })` catches drift
+after the fact. It re-embeds one stored row's own text with the active embedder
+and measures the cosine distance to the stored vector. Unchanged text under an
+unchanged model lands near 0; past `threshold` (default 0.05) it calls `alert`.
+A fixed canary string would only prove the embedder agrees with itself; a
+stored row proves that what is on disk is what the active embedder produces
+today. It never throws: a failing dependency returns a `skipped` result.
+
+## Coverage gate: is the vector leg holding enough of the corpus?
+
+A vector query over a half-built index returns plausible neighbours quickly and
+looks healthy from the outside. The coverage gate turns per-column coverage
+samples into a verdict a search tool can return with its results, so a caller
+learns that hits may be missing.
+
+```ts
+import { createCoverageGate, measureSurfaceCoverage } from '@papercusp/search';
+
+const gate = createCoverageGate({
+  // A source maps to the vector columns behind it. [] means lexical-only.
+  sources: { notes: ['app.notes.embedding'], tags: [] },
+});
+
+const sample = await measureSurfaceCoverage(sql, {
+  table: 'app.notes',
+  vectorColumn: 'embedding',
+  labelColumn: 'embedding_profile', // a vector in any other space counts as missing
+  eligibleSql: "body <> ''",
+  recencyColumn: 'created_at',
+}, activeProfileId);
+
+const report = gate.assessScope(['notes'], gate.snapshot([sample]));
+// report.degraded, report.warning, report.perSource[0].verdict
+```
+
+The verdict is `healthy`, `degraded` (the best column is below
+`coverageFloor`, default 95%), `unknown` or `not-semantic`. Absence of evidence
+is not health: a missing sample, a sample older than `maxSampleAgeMs` (default
+90 minutes) and a source with no entry in `sources` are all `unknown`. The gate
+does not drop results or change scores. A 72%-covered index is still useful;
+the caller just has to know.
+
+`measureSurfaceCoverage` is optional. A host that already counts coverage
+passes its own `CoverageSample`s to `gate.snapshot`.
+
+## Near-duplicate check with a corpus-calibrated cut
+
+For "is this new document a copy of one we already have": a cheap matcher
+(tokens, titles) proposes candidates, and the check keeps the ones whose vectors
+are close enough to count as duplicates.
+
+```ts
+import { checkNearDuplicates } from '@papercusp/search';
+
+const outcome = await checkNearDuplicates({
+  candidates,                                      // what the cheap matcher suspects
+  keyOf: (c) => c.id,
+  similarities: (keys) => cosinesTo(newDoc, keys), // Map<key, cosine>
+  sampleBackground: (excludeKeys, limit) => cosinesToRandomDocs(newDoc, excludeKeys, limit),
+});
+if (outcome.verdict) {
+  outcome.kept;              // likely duplicates, plus candidates with no stored vector
+  outcome.dropped;           // topically close, not duplicates
+  outcome.calibration.cut;
+}
+```
+
+The cut is relative to the corpus: by default, the 95th percentile of the new
+document's similarity to 256 background documents. A fixed cosine cut only means
+something for one embedding procedure. When pooling, normalisation or a prompt
+prefix changes, the whole similarity scale shifts: in the corpus this came from,
+a 0.6 cut chosen against controls at 0.46-0.49 later sat below every pair, so
+nothing could ever be dropped.
+
+Declining to decide is a normal outcome. With fewer than 32 usable background
+values, or a cut above 0.98 (a background of near-copies), the check returns
+`verdict: false` and keeps every candidate, so the caller falls back to its
+cheap matcher. `absoluteOverride` forces a fixed cut. This compares documents
+with documents; it is not a search floor, and neither threshold licenses the
+other.
+
+## Embedding backfill
+
+A table's vector column falls behind whenever rows are written, edited, or
+embedded under a profile or text recipe that is no longer current. The backfill
+engine finds those rows and embeds them.
+
+```ts
+import { createBackfillSweeper } from '@papercusp/search';
+
+const sweeper = createBackfillSweeper({
+  getTargets: () => [{
+    table: 'app.notes',
+    embedCol: 'embedding',          // labels: embedding_mode, _profile, _recipe
+    keyCols: ['id'],
+    bodySql: "coalesce(title, '') || E'\\n' || left(body, 8000)",
+    orderBySql: 'created_at DESC',  // drain order; name an indexed column
+    recipeVersion: 2,               // bump with bodySql; older rows become stale
+  }],
+  getSql: () => sql,
+  resolveEmbedder: async () => ({ mode: 'local', dims: 384, profile, embed, embedMany }),
+  resolveProfileSelection: (mode, p) => space.resolveSelection(mode, p),
+  acceptsWidth: (dims) => space.fitsStorage(dims),
+  widthSkew: (measured) => space.computeColumnWidthSkew(measured),
+  maxInputChars: 8000,
+  batchSize: 64,
+});
+
+const result = await sweeper.run(); // BackfillStats per target, or { skipped: 'already_running' }
+```
+
+A row is stale when its vector is missing, or its labels name another embedding
+space or an older text recipe. Texts are embedded in batches, and a failed batch
+falls back to one row at a time so a single bad row cannot block the rest. Input
+is truncated to `maxInputChars`, so an oversized row cannot fail and be retried
+forever. A vector whose width `acceptsWidth` rejects is counted as an error and
+not written.
+
+Each sweep reads every target's columns from the catalog once: which label
+columns exist (a table with no `_mode` column only ever fills missing vectors)
+and the vector column's live width. If the host passes `widthSkew` and it
+reports a mismatch, that target is skipped with an error naming the column;
+without the hook, width is never refused. The sweep then drains the targets
+round-robin, one batch per target per round, until they are done or the time
+budget (default 200 s) runs out.
+
+A sweeper runs one sweep at a time. Its latch lives in a `BackfillSweepState`;
+pass a pinned one if the host module can load twice.
+
 ## Extraction status
 
 Extracted per `papercusp-systems-abstraction-2026-05-29`, items P-013
 (explicit DB contract) + P-020. The Papercusp operator registers its four
 prose sources (escalations, brainstorm, operator turns, decisions) and
 its embedder cascade in `apps/operator/lib/agent-tools/search/`.
+
+Embedding-space safety, the coverage gate, the near-duplicate check and the
+backfill engine were moved here by `shared-vector-search-libraries-2026-09-29`
+(P-001, P-002, P-004, P-006). **As of 2026-09-30 they are in `src/` with their
+tests, but they are not exported from the package root yet, and the Papercusp
+operator still runs its own copies.** The root exports and the operator's
+switch to them land together, after `generic-rag-chunking-2026-09-29` ships:
+that plan's acceptance evidence pins the operator files the switch edits.
+
+What stays in Papercusp is configuration: the 768-dimension prose storage and
+its accepted profiles, the backfill target list, embed admission and the
+sidecar embedder. Papercusp's `plans:new` adopts the near-duplicate check. The
+work-item duplicate guard does not. On 493 real filings the calibrated cut alone
+missed fewer duplicates (25 of 133 against the guard's 64), but it merged 251 of
+581 distinct pairs against the guard's 32, and at filing time a false merge
+refuses a legitimate item. The comparison is in
+`docs/evidence/shared-vector-search-libraries-2026-09-29/p004-dupe-guard-comparison.json`
+(decision D-005 of that plan).
+
+Tests that run each module with no Papercusp code:
+`embedding-space.integration.test.ts` and `backfill/backfill.integration.test.ts`
+(real PostgreSQL with pgvector), `embedding-space-self-check.test.ts`,
+`coverage-gate.test.ts` and `near-duplicate.test.ts`. `import-boundary.test.ts`
+fails if anything in `src/` imports outside the package.
