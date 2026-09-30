@@ -2,7 +2,8 @@
  * chunks/shared-store — the ChunkStore for ONE shared chunk table holding
  * every surface's chunks, keyed (surface, parent_key text[], chunk_idx).
  *
- * Expected columns (papercusp: harness_shared.text_chunks, migration 1242):
+ * Expected columns (the DDL is sql/text-chunks.reference.sql; papercusp's copy is
+ * harness_shared.text_chunks, migration 1242):
  *   surface text, parent_key text[], chunk_idx int, anchor text, header text,
  *   content text, parent_sha text, chunk_sha text, splitter_version text,
  *   embedding vector, embedding_mode text, embedding_profile text,

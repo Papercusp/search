@@ -79,6 +79,61 @@ chunkers, and `chunk.golden.test.ts` pins their output against the pre-move
 code, so a change to either shows up as a failing test instead of as stored
 chunks that no longer match what the splitter produces.
 
+## Chunked collections: adding one is a registry entry
+
+The splitters above are the pure part. `chunks/` keeps stored chunks in step
+with the rows they were cut from, embeds them, and searches them, so a
+collection whose rows run past the embedder's window becomes searchable past
+the cut by adding ONE registry entry: no per-collection code, no migration.
+
+**Once per host** (not per collection):
+
+1. Apply the reference migration
+   [`sql/text-chunks.reference.sql`](sql/text-chunks.reference.sql): the shared
+   chunk table every collection writes into (pgvector >= 0.8; pick your
+   embedder's width).
+2. Build one store for it: `const store = sharedChunkStore({ table: 'app.text_chunks' })`.
+3. On a tick, run the three generic loops over your registry:
+   - `syncChunkSurfaces(sql, REGISTRY, store, { hash })` splits new and edited
+     parents, copies the vector of every chunk whose text did not change, and
+     prunes the chunks of deleted parents;
+   - for each target in `chunkEmbedTargets(REGISTRY)`, call
+     `embedPendingChunks(sql, target, { embed })` (or point your own embed sweep
+     at the target: table, key columns, vector column, and the SQL of the text to
+     embed);
+   - search with `chunkAwareVectorLeg(sql, { surface, qVec, limit, mode })`:
+     `'retrieve'` pools the parent vector with its chunks (a match anywhere in
+     the text finds the parent, with the matched section's anchor), `'gist'`
+     ranks by the parent vector alone (use it for duplicate and novelty checks).
+
+**Per collection**, the entry:
+
+```ts
+import type { ChunkSurface } from '@papercusp/search';
+
+export const NOTES: ChunkSurface = {
+  surface: 'notes',                                   // stored in every chunk row
+  parent: { table: 'app.notes', key: [{ column: 'id', type: 'int' }] },
+  textSql: 'p.body',                                  // SQL over the parent row `p`
+  headerSql: 'p.title',                               // embedded before every chunk
+  versionSql: 'p.updated_at',                         // cheap change detection
+  splitter: { kind: 'markdown', maxChars: 1500 },     // or { kind: 'window', size, overlap }
+  maxChunks: 16,                                      // text past the last chunk is logged and counted
+  parentVector: { column: 'embedding' },              // the row's existing vector, for search
+  store,
+};
+```
+
+The SQL fragments are host code, never user input; identifiers are validated
+(`resolveChunkSurface`). A collection with its own chunk table instead of the
+shared one implements `ChunkStore` and declares `queryTable` and `embedTarget`
+so search and embedding still derive from the entry.
+
+`chunks/simple-addition.integration.test.ts` is the proof: a fixture host with
+no other code registers `notes` exactly like this and checks the whole path end
+to end. Run it with `npm run test:integration` (it starts a throwaway Postgres
+from the local binaries, or uses `SEARCH_TEST_PG_URL`).
+
 ## Extraction status
 
 Extracted per `papercusp-systems-abstraction-2026-05-29`, items P-013
