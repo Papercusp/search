@@ -9,7 +9,14 @@
  * placeholder layout that drifts from its parameter list fails here.
  */
 import { describe, expect, it, vi } from 'vitest';
-import {
+import type { BackfillLogger, BackfillSql, BackfillTarget } from './index';
+import * as realSubject from './index';
+
+// Copy-out mutation probes point this at a mirror of this directory holding one
+// mutated file, so falsifiability is proven without dirtying the shared tree
+// (same seam as backfill.integration.test.ts).
+const subjectPath = process.env.PAPERCUSP_SEARCH_BACKFILL_SUBJECT;
+const {
   backfillTable,
   createBackfillSweepState,
   createBackfillSweeper,
@@ -18,10 +25,9 @@ import {
   settledPredicateSql,
   stalePredicateSql,
   truncateToChars,
-  type BackfillLogger,
-  type BackfillSql,
-  type BackfillTarget,
-} from './index';
+}: typeof realSubject = subjectPath
+  ? ((await import(subjectPath)) as typeof realSubject)
+  : realSubject;
 
 interface FakeRow {
   key: string;
