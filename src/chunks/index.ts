@@ -30,6 +30,7 @@ export {
 export {
   chunkAwareVectorLeg,
   chunkAwareVectorLegSql,
+  chunkAwareVectorLegSpaceColumns,
   chunkVectorTableOf,
   type ChunkAwareVectorLegOptions,
   type ChunkAwareLegRow,

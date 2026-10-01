@@ -253,6 +253,31 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
     LIMIT ${opts.limit}`;
 }
 
+/**
+ * Introspection only: the (profile, mode) column pairs the leg hands its
+ * `spaceFilter`, in leg order (parent leg, then the chunk leg when `mode` is
+ * 'retrieve'). It builds the leg against `sql` and DISCARDS the fragment, so
+ * nothing executes and no iterative-scan cap applies. Callers that only need
+ * the column census (embedding-space parity) use this rather than calling the
+ * builder outside withIterativeScan.
+ */
+export function chunkAwareVectorLegSpaceColumns(
+  sql: PgHandle,
+  opts: Omit<ChunkAwareVectorLegOptions, 'spaceFilter' | 'qVec' | 'limit'>,
+): SpaceFilterColumns[] {
+  const seen: SpaceFilterColumns[] = [];
+  chunkAwareVectorLegSql(sql, {
+    ...opts,
+    qVec: '[0]',
+    limit: 1,
+    spaceFilter: (cols) => {
+      seen.push(cols);
+      return sql`TRUE`;
+    },
+  } as ChunkAwareVectorLegOptions);
+  return seen;
+}
+
 /** Run the leg with HNSW iterative scan on and return the pooled rows. */
 export async function chunkAwareVectorLeg(sql: PgHandle, opts: ChunkAwareVectorLegOptions): Promise<ChunkAwareLegRow[]> {
   return (await withIterativeScan(sql, (tx) => chunkAwareVectorLegSql(tx, opts) as unknown as Promise<ChunkAwareLegRow[]>));
