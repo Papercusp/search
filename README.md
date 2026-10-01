@@ -312,11 +312,13 @@ its embedder cascade in `apps/operator/lib/agent-tools/search/`.
 
 Embedding-space safety, the coverage gate, the near-duplicate check and the
 backfill engine were moved here by `shared-vector-search-libraries-2026-09-29`
-(P-001, P-002, P-004, P-006). **As of 2026-09-30 they are in `src/` with their
-tests, but they are not exported from the package root yet, and the Papercusp
-operator still runs its own copies.** The root exports and the operator's
-switch to them land together, after `generic-rag-chunking-2026-09-29` ships:
-that plan's acceptance evidence pins the operator files the switch edits.
+(P-001, P-002, P-004, P-006). All four are exported from the package root, and
+the Papercusp operator calls them: `search/prose-vector-dims.ts` builds its
+embedding space with `createEmbeddingSpace`, `search/coverage-gate.ts` and
+`search/embed-backfill.ts` configure the gate and the sweeper, and
+`plans:new` uses `checkNearDuplicates`. One copy of the storage compatibility
+check remains in `capability-class-registry-store.ts`; its switch to the
+library is tracked as WI-10004433.
 
 What stays in Papercusp is configuration: the 768-dimension prose storage and
 its accepted profiles, the backfill target list, embed admission and the
