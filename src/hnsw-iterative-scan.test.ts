@@ -54,6 +54,58 @@ describe('withIterativeScan capability probing', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('uses an injected bounded read-only transaction for both probe and query', async () => {
+    const { sql, probeCount, bodyTransactions } = makeSql();
+    const runReadOnlyTransaction = vi.fn(async (body: (tx: PgHandle) => Promise<unknown>) =>
+      sql.begin(async (tx) => {
+        await tx`SET TRANSACTION READ ONLY`;
+        return body(tx);
+      }),
+    );
+    const bodies: PgHandle[] = [];
+
+    const result = await withIterativeScan(
+      sql,
+      async (handle) => {
+        bodies.push(handle);
+        return 'rows';
+      },
+      { runReadOnlyTransaction },
+    );
+
+    expect(result).toBe('rows');
+    expect(runReadOnlyTransaction).toHaveBeenCalledTimes(2);
+    expect(bodyTransactions()).toBe(2);
+    expect(probeCount()).toBe(0);
+    expect(bodies[0]).not.toBe(sql);
+  });
+
+  it('keeps the unsupported-server fallback inside the injected bounded transaction', async () => {
+    const { sql, bodyTransactions } = makeSql();
+    const missingSetting = Object.assign(new Error('unrecognized configuration parameter "hnsw.iterative_scan"'), {
+      code: '42704',
+    });
+    const runReadOnlyTransaction = vi.fn(async (body: (tx: PgHandle) => Promise<unknown>) => {
+      if (runReadOnlyTransaction.mock.calls.length === 1) throw missingSetting;
+      return sql.begin(async (tx) => {
+        await tx`SET TRANSACTION READ ONLY`;
+        return body(tx);
+      });
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bodies: PgHandle[] = [];
+
+    await withIterativeScan(sql, async (handle) => {
+      bodies.push(handle);
+      return 'rows';
+    }, { runReadOnlyTransaction });
+
+    expect(runReadOnlyTransaction).toHaveBeenCalledTimes(2);
+    expect(bodyTransactions()).toBe(1);
+    expect(bodies[0]).not.toBe(sql);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not support'));
+  });
+
   it('retries after a transient probe failure instead of poisoning the handle', async () => {
     const { sql, probeCount, bodyTransactions } = makeSql(
       Object.assign(new Error('connection reset by peer'), { code: '08006' }),

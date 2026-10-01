@@ -74,6 +74,11 @@ import type { PgHandle } from './types';
  * answer is collectable with it.
  */
 const supportByHandle = new WeakMap<PgHandle, Promise<boolean>>();
+// Keep bounded probes separate so a concurrent legacy probe that is still
+// waiting on pool acquisition cannot make an abort-aware caller wait on it.
+const boundedSupportByHandle = new WeakMap<PgHandle, Promise<boolean>>();
+
+type ReadOnlyTransactionRunner = <T>(body: (sql: PgHandle) => Promise<T>) => Promise<T>;
 
 function isMissingIterativeScanParameter(error: unknown): boolean {
   const candidate = error as { code?: unknown; message?: unknown } | null;
@@ -85,8 +90,9 @@ function isMissingIterativeScanParameter(error: unknown): boolean {
   return code === '42704' || /unrecognized configuration parameter[\s\S]*hnsw\.iterative_scan/i.test(message);
 }
 
-function probeIterativeScan(sql: PgHandle): Promise<boolean> {
-  const cached = supportByHandle.get(sql);
+function probeIterativeScan(sql: PgHandle, runReadOnlyTransaction?: ReadOnlyTransactionRunner): Promise<boolean> {
+  const cache = runReadOnlyTransaction ? boundedSupportByHandle : supportByHandle;
+  const cached = cache.get(sql);
   if (cached) return cached;
 
   let probe!: Promise<boolean>;
@@ -94,9 +100,15 @@ function probeIterativeScan(sql: PgHandle): Promise<boolean> {
     try {
       // Inside a transaction so the SET is rolled back either way and can never
       // leak onto a pooled connection.
-      await sql.begin(async (tx) => {
-        await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
-      });
+      if (runReadOnlyTransaction) {
+        await runReadOnlyTransaction(async (tx) => {
+          await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+        });
+      } else {
+        await sql.begin(async (tx) => {
+          await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+        });
+      }
       return true;
     } catch (error) {
       const permanentUnsupported = isMissingIterativeScanParameter(error);
@@ -112,13 +124,13 @@ function probeIterativeScan(sql: PgHandle): Promise<boolean> {
       // An undefined GUC is a stable server capability result and remains
       // cached. Any other failure may be a pool hiccup or restart; remove only
       // THIS probe so a newer probe that raced with it is never deleted.
-      if (!permanentUnsupported && supportByHandle.get(sql) === probe) {
-        supportByHandle.delete(sql);
+      if (!permanentUnsupported && cache.get(sql) === probe) {
+        cache.delete(sql);
       }
       return false;
     }
   })();
-  supportByHandle.set(sql, probe);
+  cache.set(sql, probe);
   return probe;
 }
 
@@ -138,14 +150,26 @@ function probeIterativeScan(sql: PgHandle): Promise<boolean> {
 export async function withIterativeScan<T>(
   sql: PgHandle,
   body: (sql: PgHandle) => Promise<T>,
+  options: { runReadOnlyTransaction?: ReadOnlyTransactionRunner } = {},
 ): Promise<T> {
+  const runReadOnlyTransaction = options.runReadOnlyTransaction;
   // A transaction-scoped handle (postgres.js TransactionSql, e.g. the one
   // sessions:search hands runHybridSearch) has no `begin`. Probing it threw
   // `sql.begin is not a function` on EVERY call and warned as if transient
   // (WI-10002536). Run the body on the caller's transaction with the legacy
   // capped scan — the same fallback that failed probe always produced.
-  if (typeof (sql as { begin?: unknown }).begin !== 'function') return body(sql);
-  if (!(await probeIterativeScan(sql))) return body(sql);
+  if (!runReadOnlyTransaction && typeof (sql as { begin?: unknown }).begin !== 'function') return body(sql);
+  const supported = await probeIterativeScan(sql, runReadOnlyTransaction);
+  if (runReadOnlyTransaction) {
+    // The injected runner owns the READ ONLY transaction and its acquisition,
+    // statement timeout, and abort handling. Run the body through it even on an
+    // older server without iterative scan so the fallback query stays bounded.
+    return runReadOnlyTransaction(async (tx) => {
+      if (supported) await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+      return body(tx);
+    });
+  }
+  if (!supported) return body(sql);
   return sql.begin(async (tx) => {
     // READ ONLY keeps it honest: these are search reads, and the marker makes an
     // accidental write inside a search leg fail loudly rather than commit.
@@ -158,4 +182,5 @@ export async function withIterativeScan<T>(
 /** Test seam: forget the cached capability probe for a handle. */
 export function resetIterativeScanProbe(sql: PgHandle): void {
   supportByHandle.delete(sql);
+  boundedSupportByHandle.delete(sql);
 }
