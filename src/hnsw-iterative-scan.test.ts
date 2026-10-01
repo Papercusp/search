@@ -3,6 +3,7 @@ import type { PgHandle } from './types';
 import { resetIterativeScanProbe, withIterativeScan } from './hnsw-iterative-scan';
 
 type FakeSql = PgHandle;
+type ReadOnlyTransactionRunner = <T>(body: (tx: PgHandle) => Promise<T>) => Promise<T>;
 
 function makeSql(probeError?: Error & { code?: string }): {
   sql: FakeSql;
@@ -59,7 +60,7 @@ describe('withIterativeScan capability probing', () => {
     const runReadOnlyTransaction = vi.fn(async (body: (tx: PgHandle) => Promise<unknown>) =>
       sql.begin(async (tx) => {
         await tx`SET TRANSACTION READ ONLY`;
-        return body(tx);
+        return body(tx as unknown as PgHandle);
       }),
     );
     const bodies: PgHandle[] = [];
@@ -70,7 +71,7 @@ describe('withIterativeScan capability probing', () => {
         bodies.push(handle);
         return 'rows';
       },
-      { runReadOnlyTransaction },
+      { runReadOnlyTransaction: runReadOnlyTransaction as unknown as ReadOnlyTransactionRunner },
     );
 
     expect(result).toBe('rows');
@@ -89,7 +90,7 @@ describe('withIterativeScan capability probing', () => {
       if (runReadOnlyTransaction.mock.calls.length === 1) throw missingSetting;
       return sql.begin(async (tx) => {
         await tx`SET TRANSACTION READ ONLY`;
-        return body(tx);
+        return body(tx as unknown as PgHandle);
       });
     });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -98,7 +99,7 @@ describe('withIterativeScan capability probing', () => {
     await withIterativeScan(sql, async (handle) => {
       bodies.push(handle);
       return 'rows';
-    }, { runReadOnlyTransaction });
+    }, { runReadOnlyTransaction: runReadOnlyTransaction as unknown as ReadOnlyTransactionRunner });
 
     expect(runReadOnlyTransaction).toHaveBeenCalledTimes(2);
     expect(bodyTransactions()).toBe(1);
