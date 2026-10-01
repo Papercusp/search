@@ -343,8 +343,8 @@ describe('fixture host: backfill engine', () => {
     });
 
     const result = await sweeper.run();
-    expect(Array.isArray(result)).toBe(true);
-    const stats = (result as Array<Record<string, unknown>>).map(({ durationMs: _d, ...s }) => s);
+    if (!Array.isArray(result)) throw new Error(`sweep skipped: ${result.skipped}`);
+    const stats = result.map(({ durationMs: _d, ...s }) => s);
     expect(stats).toEqual([
       { table: 'herbarium.sheets', scanned: 2, embedded: 2, errors: 0 },
       { table: 'herbarium.labels', scanned: 0, embedded: 0, errors: 0 },
@@ -392,8 +392,9 @@ describe('fixture host: backfill engine', () => {
       logger: { log: (m) => lines.push(m), warn: (m) => lines.push(m), error: (m) => lines.push(m) },
     });
     const result = await sweeper.run();
+    if (!Array.isArray(result)) throw new Error(`sweep skipped: ${result.skipped}`);
     expect(tables['herbarium.sheets']!.rows[0]!.stale).toBe(true);
-    expect((result as Array<{ embedded: number }>)[0]!.embedded).toBe(0);
+    expect(result[0]!.embedded).toBe(0);
     expect(lines.join('\n')).toContain('profile herbarium-sheets@3 is incompatible');
   });
 });
