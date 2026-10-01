@@ -12,16 +12,17 @@
  * @papercusp/search-core, which has its own fixture-host spec.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  checkNearDuplicates,
-  createBackfillSweeper,
-  createCoverageGate,
-  createEmbeddingSpace,
-  type BackfillLogger,
-  type BackfillSql,
-  type CoverageSample,
-  type EmbeddingProfileSpec,
-} from './index';
+import * as entry from './index';
+import type { BackfillLogger, BackfillSql, CoverageSample, EmbeddingProfileSpec } from './index';
+
+/**
+ * Falsifiability seam. A copy-out mutation probe sets this to the entry of a
+ * mirrored copy of src/ so a mutant library is loaded without touching the
+ * tracked source. Unset in every normal run.
+ */
+const SUBJECT = process.env.PAPERCUSP_SEARCH_FIXTURE_HOST_SUBJECT;
+const lib: typeof entry = SUBJECT ? ((await import(SUBJECT)) as typeof entry) : entry;
+const { checkNearDuplicates, createBackfillSweeper, createCoverageGate, createEmbeddingSpace } = lib;
 
 // ─── the host's model list and storage ─────────────────────────────────────
 
