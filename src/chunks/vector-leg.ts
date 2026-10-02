@@ -111,12 +111,35 @@ export interface ChunkAwareVectorLegOptions {
    *
    * The chunk leg then names the surface as a SQL literal, so a partial HNSW
    * index `WHERE surface = '<name>'` matches even under a generic plan, and
-   * tests slice membership as a filter over `to_jsonb(parent_key)` rather than
-   * a join, so the planner has no cheaper join plan to prefer over the index.
-   * Rows are approximate (ANN): pair it with `withIterativeScan`'s `efSearch`.
+   * reads the chunk table without reference to the slice: membership is
+   * enforced exactly by the join back to the slice AFTER the inner LIMIT
+   * (`chunkCandidates`), so the planner has no slice join or membership test to
+   * prefer over the index (generic-rag-chunking D-048). A candidate whose parent
+   * is outside the slice is wasted, so this form fits a surface whose chunks
+   * are (nearly) all slice members: give the surface an `eligibleSql` matching
+   * its readers' population, so sync keeps only those chunks, and narrow the
+   * rest with `chunkFilter`. Rows are approximate (ANN). Under default GUCs an
+   * HNSW scan returns at most `hnsw.ef_search` candidates before `chunkFilter`
+   * and the space filter apply; a chunk lost that way leaves the parent to its
+   * own leg (a recall loss, never a wrong row). Run it inside
+   * `withIterativeScan` when the filters discard a large share of the surface.
    * Requires a shared-keying chunk table and mode 'retrieve' to matter.
    */
   chunkScan?: ChunkLegScan;
+  /**
+   * The ANN chunk leg over an exact slice only (`scan: 'exact'`, `chunkScan:
+   * 'ann'`): a predicate over the chunk alias `c`, applied inside the inner
+   * index scan, e.g. `c.parent_key[1] = ${workspaceId}`. It only narrows the
+   * candidates — membership stays exact through the join back to the slice —
+   * so keep it cheap. Default TRUE.
+   */
+  chunkFilter?: Fragment;
+  /**
+   * The ANN chunk leg over an exact slice only: how many candidates the inner
+   * index scan returns before the join back to the slice drops non-members.
+   * Default `limit`.
+   */
+  chunkCandidates?: number;
 }
 
 /** One pooled row. Key columns are present under their own names. */
@@ -198,6 +221,13 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
   }
   // The mixed form (D-046): exact parent leg over the slice, ANN chunk leg.
   const chunkAnnOverSlice = exact && chunkScan === 'ann';
+  if ((opts.chunkFilter !== undefined || opts.chunkCandidates !== undefined) && !chunkAnnOverSlice) {
+    throw new Error("chunk vector leg: chunkFilter and chunkCandidates apply only to scan 'exact' with chunkScan 'ann'");
+  }
+  const chunkCandidates = opts.chunkCandidates ?? opts.limit;
+  if (!Number.isInteger(chunkCandidates) || chunkCandidates <= 0) {
+    throw new Error('chunk vector leg: chunkCandidates must be a positive integer');
+  }
 
   const filter = opts.parentFilter ?? sql`TRUE`;
   const space = opts.spaceFilter ?? (() => sql`TRUE`);
@@ -281,19 +311,20 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
       if (!SURFACE_LITERAL.test(surfaceName)) {
         throw new Error(`chunk vector leg: surface '${surfaceName}' cannot be inlined as a SQL literal`);
       }
-      // D-046. The inner query reads the chunk table ALONE and orders by the
-      // vector operator, so an HNSW index can serve it; three choices keep the
-      // planner on that index:
+      // D-046, D-048. The inner query reads the chunk table ALONE and orders by
+      // the vector operator, so an HNSW index can serve it:
       //   - the surface is a literal, so a partial index `WHERE surface = '<name>'`
       //     matches under a generic plan too (a bind parameter never does);
-      //   - membership in the slice is a filter over to_jsonb(parent_key) against
-      //     a jsonb array built once from the slice, not a join: given a join, the
-      //     planner prefers per-parent key probes, which is the cost this avoids
-      //     (jsonb, because ANY over an array of text arrays flattens it to text);
+      //   - it never references the slice. Membership is exact through the join
+      //     back to the slice after the LIMIT. D-046 tested membership inside the
+      //     scan instead (to_jsonb(parent_key) against the slice): on consult that
+      //     filter kept 11% of candidates, which forced an iterative scan and its
+      //     transaction, and cost ~8 ms at p95 against a 3.5 ms budget (D-047);
       //   - nothing else in the inner query is ordered or joined.
       // The LIMIT stays inside, so the join back to the slice (for the parent's
-      // typed key columns) reads at most `limit` rows.
+      // typed key columns) reads at most `chunkCandidates` rows.
       const sliceKey = `ARRAY[${keys.map((k) => `(${alias}.${k.column})::text`).join(', ')}]`;
+      const chunkFilter = opts.chunkFilter ?? sql`TRUE`;
       legs = sql`${parentLeg}
     UNION ALL
     (SELECT ${keySelect}, hit.distance, hit.matched_anchor, 1 AS leg
@@ -304,10 +335,9 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
               WHERE ${sql.unsafe(`${CHUNK_ALIAS}.surface = '${surfaceName}'`)}
                 AND ${sql.unsafe(emb)} IS NOT NULL
                 AND (${space({ profileColumn: profile, modeColumn: modeCol })})
-                AND to_jsonb(${sql.unsafe(CHUNK_ALIAS)}.parent_key) = ANY (ARRAY(
-                      SELECT to_jsonb(${sql.unsafe(sliceKey)}) FROM ${sql.unsafe(`${SLICE_CTE} ${alias}`)}))
+                AND (${chunkFilter})
            ORDER BY ${sql.unsafe(emb)} <=> ${q}::vector
-              LIMIT ${opts.limit}) hit
+              LIMIT ${chunkCandidates}) hit
        JOIN ${sql.unsafe(`${SLICE_CTE} ${alias}`)} ON hit.parent_key = ${sql.unsafe(sliceKey)})`;
     } else {
       // 'exact' orders by the output distance, which adds the margin: an HNSW
