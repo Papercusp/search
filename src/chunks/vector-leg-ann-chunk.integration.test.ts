@@ -9,6 +9,10 @@
  *      this small fixture is exhaustive (so a mismatch is a SQL defect — wrong
  *      membership, key mapping or margin — never ANN approximation). Recall at
  *      the production ef_search on the real corpus is D-046's measurement.
+ *      Membership is the join after the inner LIMIT (D-048), so the brute-force
+ *      check takes every item chunk as a candidate, a chunkFilter matching the
+ *      slice makes the default candidate count exact, and the crowded case (the
+ *      documented bound) loses recall without returning a wrong row.
  *   2. The partial index `WHERE surface = 'items'` is usable by the chunk leg:
  *      with sequential scans and sorts priced out, the plan walks it. The
  *      fixture drops the whole-table HNSW index, so only the partial one can
@@ -20,7 +24,13 @@ import { readFileSync } from 'node:fs';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import { withIterativeScan } from '../hnsw-iterative-scan';
-import { chunkAwareVectorLegSql, sharedChunkStore, type ChunkLegScan, type ChunkSurface } from './index';
+import {
+  chunkAwareVectorLegSql,
+  sharedChunkStore,
+  type ChunkAwareVectorLegOptions,
+  type ChunkLegScan,
+  type ChunkSurface,
+} from './index';
 
 const SCHEMA = `vleg_annchunk_${process.pid}_${Date.now()}`;
 const REFERENCE_SQL = readFileSync(new URL('../../sql/text-chunks.reference.sql', import.meta.url), 'utf8');
@@ -87,7 +97,8 @@ type Row = { id: number; distance: number; matched_anchor: string | null };
 describe("chunkAwareVectorLegSql chunkScan:'ann' over an exact slice (D-046)", () => {
   let sql: postgres.Sql;
 
-  const legSql = (tx: postgres.Sql, chunkScan: ChunkLegScan | undefined, limit: number) =>
+  type Extra = (tx: postgres.Sql) => Partial<ChunkAwareVectorLegOptions>;
+  const legSql = (tx: postgres.Sql, chunkScan: ChunkLegScan | undefined, limit: number, extra?: Extra) =>
     chunkAwareVectorLegSql(tx as never, {
       surface: ITEMS,
       qVec: vecText(QUERY),
@@ -96,12 +107,18 @@ describe("chunkAwareVectorLegSql chunkScan:'ann' over an exact slice (D-046)", (
       scan: 'exact',
       chunkScan,
       parentFilter: tx`p.kind = 'rare'` as never,
+      ...extra?.(tx),
     });
 
-  const run = (chunkScan: ChunkLegScan | undefined, limit: number) =>
-    withIterativeScan(sql as never, (tx) => legSql(tx as never, chunkScan, limit) as never, {
+  const run = (chunkScan: ChunkLegScan | undefined, limit: number, extra?: Extra) =>
+    withIterativeScan(sql as never, (tx) => legSql(tx as never, chunkScan, limit, extra) as never, {
       efSearch: EXHAUSTIVE_EF,
     }) as unknown as Promise<Row[]>;
+
+  /** Every item chunk is a candidate, so slice membership is entirely the join's job. */
+  const ALL_ITEM_CHUNKS: Extra = () => ({ chunkCandidates: PARENTS * 2 });
+  /** What a surface's eligibleSql gives D-048: only slice members are candidates. */
+  const RARE_CHUNKS: Extra = (tx) => ({ chunkFilter: tx`(c.parent_key[1])::int % ${RARE_EVERY} = 0` as never });
 
   beforeAll(async () => {
     sql = postgres(inject('searchPgUrl'), { max: 4, onnotice: () => {} });
@@ -181,7 +198,7 @@ describe("chunkAwareVectorLegSql chunkScan:'ann' over an exact slice (D-046)", (
 
   it('returns the brute-force nearest parents, the same as the exact chunk leg', async () => {
     for (const limit of [1, 5, 8]) {
-      const ann = await run('ann', limit);
+      const ann = await run('ann', limit, ALL_ITEM_CHUNKS);
       const exact = await run(undefined, limit);
       const want = expectedTop(limit);
       expect(ann.map((r) => r.id)).toEqual(want.map((r) => r.id));
@@ -189,6 +206,31 @@ describe("chunkAwareVectorLegSql chunkScan:'ann' over an exact slice (D-046)", (
       ann.forEach((r, i) => expect(Number(r.distance)).toBeCloseTo(want[i]!.distance, 5));
       ann.forEach((r, i) => expect(r.matched_anchor).toBe(exact[i]!.matched_anchor));
       expect(ann.every((r) => isRare(r.id))).toBe(true);
+    }
+  });
+
+  // D-048: when the candidates are slice members (the surface's eligibleSql plus a
+  // cheap chunkFilter), the default candidate count (= limit) is already exact.
+  it('with a chunk filter matching the slice, the default candidate count returns the brute-force parents', async () => {
+    for (const limit of [1, 5, 8]) {
+      const ann = await run('ann', limit, RARE_CHUNKS);
+      const want = expectedTop(limit);
+      expect(ann.map((r) => r.id)).toEqual(want.map((r) => r.id));
+      ann.forEach((r, i) => expect(Number(r.distance)).toBeCloseTo(want[i]!.distance, 5));
+    }
+  });
+
+  // The documented bound: candidates taken before the join, when crowded by
+  // non-member chunks, lose chunk matches. That is a recall loss, never a wrong
+  // row: no non-member, and no distance nearer than the parent's true one.
+  it('pins the bound: non-member candidates crowd out member chunks, but never yield a wrong row', async () => {
+    const truth = new Map(expectedTop(PARENTS).map((r) => [r.id, r.distance]));
+    const crowded = await run('ann', 5);
+    expect(crowded.map((r) => r.id)).not.toEqual(expectedTop(5).map((r) => r.id)); // calibration: the bound bites here
+    for (const r of crowded) {
+      expect(isRare(r.id), String(r.id)).toBe(true);
+      // pgvector computes in float32, so allow its rounding (~1e-8 here), nothing more.
+      expect(Number(r.distance)).toBeGreaterThanOrEqual(truth.get(r.id)! - 1e-6);
     }
   });
 
