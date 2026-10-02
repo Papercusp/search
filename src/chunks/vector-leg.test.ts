@@ -7,8 +7,9 @@
  * returns, so they are pinned here as text:
  *   1. the surface is a LITERAL (a bind parameter never matches a partial
  *      index's predicate under a generic plan);
- *   2. the chunk leg reads the chunk table alone and tests slice membership as
- *      a jsonb filter, not a join (given a join, the planner probes per parent);
+ *   2. the chunk leg reads the chunk table alone, never the slice: membership
+ *      is the join back to the slice after the LIMIT (D-048; D-046's in-scan
+ *      jsonb membership filter forced an iterative scan and cost ~8 ms);
  *   3. the chunk leg orders by the vector operator itself.
  * The integration test (vector-leg-ann-chunk.integration.test.ts) checks that
  * real Postgres then uses the index and returns the right parents.
@@ -82,16 +83,55 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
     expect(params).not.toContain('consult_questions');
   });
 
-  it('reads the chunk table alone, with slice membership as a jsonb filter', () => {
+  it('reads the chunk table alone; slice membership is the join after the LIMIT (D-048)', () => {
     const leg = chunkLegOf(build({ chunkScan: 'ann' }).text);
     const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
     expect(inner).toContain('FROM harness_shared.text_chunks c WHERE');
-    expect(inner).toContain(
-      'to_jsonb(c.parent_key) = ANY (ARRAY( SELECT to_jsonb(ARRAY[(cs.workspace_id)::text, (cs.conversation_id)::text]) FROM chunk_leg_slice cs))',
-    );
-    // No join inside the ranked query: the only join is back to the slice, after the LIMIT.
+    // The ranked query never reads the slice, so membership cannot thin the index scan.
+    expect(inner).not.toContain('chunk_leg_slice');
+    expect(inner).not.toContain('to_jsonb');
     expect(inner).not.toMatch(/\bJOIN\b/);
     expect(leg).toMatch(/LIMIT \$\d+\) hit JOIN chunk_leg_slice cs ON hit\.parent_key = ARRAY\[\(cs\.workspace_id\)::text, \(cs\.conversation_id\)::text\]/);
+  });
+
+  it('applies chunkFilter inside the ranked query and chunkCandidates as its LIMIT', () => {
+    const sql = fakeSql();
+    const { text, params } = render(
+      chunkAwareVectorLegSql(sql, {
+        surface: SURFACE,
+        parentAlias: 'cs',
+        qVec: '[0.1,0.2]',
+        limit: 1,
+        mode: 'retrieve',
+        scan: 'exact',
+        chunkScan: 'ann',
+        parentFilter: sql`cs.workspace_id = ${'ws-1'}` as never,
+        chunkFilter: sql`c.parent_key[1] = ${'ws-1'}` as never,
+        chunkCandidates: 40,
+      }),
+    );
+    const leg = chunkLegOf(text);
+    const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
+    const filter = inner.match(/AND \(c\.parent_key\[1\] = \$(\d+)\) ORDER BY c\.embedding <=> \$\d+::vector LIMIT \$(\d+)$/);
+    expect(filter, inner).not.toBeNull();
+    expect(params[Number(filter![1]) - 1]).toBe('ws-1');
+    expect(params[Number(filter![2]) - 1]).toBe(40);
+  });
+
+  it('defaults chunkCandidates to limit and chunkFilter to TRUE', () => {
+    const { text, params } = build({ chunkScan: 'ann', limit: 7 });
+    const leg = chunkLegOf(text);
+    const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
+    const m = inner.match(/AND \(TRUE\) ORDER BY c\.embedding <=> \$\d+::vector LIMIT \$(\d+)$/);
+    expect(m, inner).not.toBeNull();
+    expect(params[Number(m![1]) - 1]).toBe(7);
+  });
+
+  it('refuses chunkFilter or chunkCandidates outside the ANN-over-slice form', () => {
+    const sql = fakeSql();
+    expect(() => build({ chunkFilter: sql`TRUE` as never })).toThrow(/apply only to scan 'exact' with chunkScan 'ann'/);
+    expect(() => build({ scan: 'ann', chunkCandidates: 40 })).toThrow(/apply only to scan 'exact' with chunkScan 'ann'/);
+    expect(() => build({ chunkScan: 'ann', chunkCandidates: 0 })).toThrow(/chunkCandidates must be a positive integer/);
   });
 
   it('orders the chunk leg by the vector operator, so an HNSW index can serve it', () => {
