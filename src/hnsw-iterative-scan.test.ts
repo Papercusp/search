@@ -193,7 +193,9 @@ describe('withIterativeScan efSearch (generic-rag-chunking D-046)', () => {
 
   it('sets it inside an injected read-only transaction runner too', async () => {
     const { sql, statements } = recordingSql();
-    const runReadOnlyTransaction = vi.fn(async (body: (tx: PgHandle) => Promise<unknown>) => sql.begin(body));
+    const runReadOnlyTransaction = vi.fn(async (body: (tx: PgHandle) => Promise<unknown>) =>
+      sql.begin(async (tx) => body(tx as unknown as PgHandle)),
+    );
     await withIterativeScan(sql, async (tx) => tx`SELECT body`, {
       efSearch: 200,
       runReadOnlyTransaction: runReadOnlyTransaction as unknown as ReadOnlyTransactionRunner,
