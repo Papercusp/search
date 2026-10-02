@@ -193,23 +193,54 @@ export async function withIterativeScan<T>(
     // statement timeout, and abort handling. Run the body through it even on an
     // older server without iterative scan so the fallback query stays bounded.
     return runReadOnlyTransaction(async (tx) => {
-      if (supported) {
-        await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
-        // SET cannot take a bind parameter; set_config(..., is_local => true) can.
-        if (efSearch !== null) await tx`SELECT set_config('hnsw.ef_search', ${efSearch}, true)`;
-      }
-      return body(tx);
+      if (!supported) return body(tx);
+      return pipelined(
+        [
+          tx`SET LOCAL hnsw.iterative_scan = relaxed_order`,
+          // SET cannot take a bind parameter; set_config(..., is_local => true) can.
+          ...(efSearch !== null ? [tx`SELECT set_config('hnsw.ef_search', ${efSearch}, true)`] : []),
+        ],
+        () => body(tx),
+      );
     });
   }
   if (!supported) return body(sql);
   return sql.begin(async (tx) => {
-    // READ ONLY keeps it honest: these are search reads, and the marker makes an
-    // accidental write inside a search leg fail loudly rather than commit.
-    await tx`SET TRANSACTION READ ONLY`;
-    await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
-    if (efSearch !== null) await tx`SELECT set_config('hnsw.ef_search', ${efSearch}, true)`;
-    return body(tx as unknown as PgHandle);
+    const handle = tx as unknown as PgHandle;
+    return pipelined(
+      [
+        // READ ONLY keeps it honest: these are search reads, and the marker makes an
+        // accidental write inside a search leg fail loudly rather than commit.
+        handle`SET TRANSACTION READ ONLY`,
+        handle`SET LOCAL hnsw.iterative_scan = relaxed_order`,
+        ...(efSearch !== null ? [handle`SELECT set_config('hnsw.ef_search', ${efSearch}, true)`] : []),
+      ],
+      () => body(handle),
+    );
   }) as Promise<T>;
+}
+
+/**
+ * Issue the setup statements, then the body, without waiting in between.
+ *
+ * On one transaction connection the driver sends them in issue order and the
+ * server runs them in that order, so the body still sees the settings — but the
+ * setup and the body's first query share one network round trip instead of one
+ * each. Measured on consult's chunk-aware lookup (generic-rag-chunking D-047):
+ * the six-round-trip wrapper cost 1.5/1.9 ms p50/p95 over a 0.24/0.37 ms single
+ * statement under fleet load.
+ *
+ * Setup is issued first: each statement is started (`then` attached) before the
+ * body is called, and the body runs a microtask later. A failing setup statement
+ * aborts the transaction, so the body's query fails with it and the transaction
+ * rolls back; Promise.all observes both, so neither rejection goes unhandled, and
+ * the setup error (the earlier response) is the one reported.
+ */
+async function pipelined<T>(setup: readonly PromiseLike<unknown>[], body: () => Promise<T>): Promise<T> {
+  const settled = Promise.all(setup);
+  const result = Promise.resolve().then(body);
+  const [, value] = await Promise.all([settled, result]);
+  return value;
 }
 
 /** Test seam: forget the cached capability probe for a handle. */
