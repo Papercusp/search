@@ -118,6 +118,13 @@ export interface SearchFilters {
   since?: string;
   /** ISO timestamp exclusive upper bound. */
   until?: string;
+  /**
+   * The identities of whoever is READING the results. A source that enforces a
+   * per-reader visibility rule withholds the rows those identities may not see,
+   * inside its own query so they never compete for a result slot. Absent = the
+   * source applies no reader rule.
+   */
+  readerIds?: string[];
 }
 
 /** Inputs handed to a source's ranker functions. */
