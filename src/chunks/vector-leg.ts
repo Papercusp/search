@@ -20,6 +20,10 @@
  * ordered by distance and then key. The caller joins that back to its parent
  * for display, which is why the leg is exposed as a FRAGMENT too.
  *
+ * Each leg ranks exactly over a materialised slice of the filtered parents, or
+ * by ANN over an HNSW index (`scan`); `chunkScan` lets the chunk leg stay ANN
+ * while the parent leg is exact (D-046).
+ *
  * Nothing here knows a host's schema or its embedding-space rules: the space
  * filter is injected (D-011) and every identifier is validated, never quoted
  * from caller text.
@@ -33,6 +37,8 @@ import type { ChunkKeyColumn, ChunkStore, ChunkSurface, ChunkVectorTable } from 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 const QUALIFIED_IDENT = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
 const SQL_TYPE = /^[a-z_][a-z0-9_ ]*(\[\])?$/;
+/** A surface name the ANN chunk leg may inline as a SQL literal: no quote can appear. */
+const SURFACE_LITERAL = /^[a-z0-9_][a-z0-9_.:-]*$/;
 const CHUNK_ALIAS = 'c';
 
 export type ChunkLegMode = 'retrieve' | 'gist';
@@ -92,6 +98,23 @@ export interface ChunkAwareVectorLegOptions {
    * about 20k rows discarded, against about 30 ms per leg exact.
    */
   scan?: ChunkLegScan;
+  /**
+   * How the CHUNK leg ranks. Default: the same as `scan`. The one mixed form is
+   * `scan: 'exact'` with `chunkScan: 'ann'` (generic-rag-chunking D-046): the
+   * parent leg stays exact over the materialised slice, while the chunk leg
+   * reads the chunk table alone, ordered by the vector operator, so an HNSW
+   * index on the chunk table can serve it. Use it when the slice's chunks are
+   * many and each one's vector is TOASTed, so the exact chunk leg's per-parent
+   * key probes and detoasting cost more than an index walk.
+   *
+   * The chunk leg then names the surface as a SQL literal, so a partial HNSW
+   * index `WHERE surface = '<name>'` matches even under a generic plan, and
+   * tests slice membership as a filter over `to_jsonb(parent_key)` rather than
+   * a join, so the planner has no cheaper join plan to prefer over the index.
+   * Rows are approximate (ANN): pair it with `withIterativeScan`'s `efSearch`.
+   * Requires a shared-keying chunk table and mode 'retrieve' to matter.
+   */
+  chunkScan?: ChunkLegScan;
 }
 
 /** One pooled row. Key columns are present under their own names. */
@@ -166,6 +189,13 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
   const scan = opts.scan ?? 'ann';
   if (scan !== 'ann' && scan !== 'exact') throw new Error(`chunk vector leg: unknown scan '${String(scan)}'`);
   const exact = scan === 'exact';
+  const chunkScan = opts.chunkScan ?? scan;
+  if (chunkScan !== 'ann' && chunkScan !== 'exact') throw new Error(`chunk vector leg: unknown chunkScan '${String(chunkScan)}'`);
+  if (chunkScan === 'exact' && !exact) {
+    throw new Error("chunk vector leg: chunkScan 'exact' needs scan 'exact' (the exact chunk leg reads the materialised slice)");
+  }
+  // The mixed form (D-046): exact parent leg over the slice, ANN chunk leg.
+  const chunkAnnOverSlice = exact && chunkScan === 'ann';
 
   const filter = opts.parentFilter ?? sql`TRUE`;
   const space = opts.spaceFilter ?? (() => sql`TRUE`);
@@ -224,11 +254,50 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
             .join(' AND ')
       : keys.map((k) => `${alias}.${k.column} = ${CHUNK_ALIAS}.${k.column}`).join(' AND ');
     const surfaceMatch = chunks.keying === 'shared' ? sql`${sql.unsafe(CHUNK_ALIAS)}.surface = ${surfaceName} AND` : sql``;
-    // 'exact' orders by the output distance, which adds the margin: an HNSW
-    // index can only serve `ORDER BY <column> <=> <query>` itself, so this sort is
-    // exhaustive over the slice's chunks. Same order, since the margin is constant.
-    const chunkOrder = exact ? sql`distance` : sql`${sql.unsafe(emb)} <=> ${q}::vector`;
-    legs = sql`${parentLeg}
+    if (chunkAnnOverSlice) {
+      if (chunks.keying !== 'shared') {
+        throw new Error(
+          `chunk vector leg: chunkScan 'ann' with scan 'exact' needs a shared-keying chunk table; ` +
+            `surface '${surfaceName}' reads '${table}' (keying '${chunks.keying}')`,
+        );
+      }
+      if (!SURFACE_LITERAL.test(surfaceName)) {
+        throw new Error(`chunk vector leg: surface '${surfaceName}' cannot be inlined as a SQL literal`);
+      }
+      // D-046. The inner query reads the chunk table ALONE and orders by the
+      // vector operator, so an HNSW index can serve it; three choices keep the
+      // planner on that index:
+      //   - the surface is a literal, so a partial index `WHERE surface = '<name>'`
+      //     matches under a generic plan too (a bind parameter never does);
+      //   - membership in the slice is a filter over to_jsonb(parent_key) against
+      //     a jsonb array built once from the slice, not a join: given a join, the
+      //     planner prefers per-parent key probes, which is the cost this avoids
+      //     (jsonb, because ANY over an array of text arrays flattens it to text);
+      //   - nothing else in the inner query is ordered or joined.
+      // The LIMIT stays inside, so the join back to the slice (for the parent's
+      // typed key columns) reads at most `limit` rows.
+      const sliceKey = `ARRAY[${keys.map((k) => `(${alias}.${k.column})::text`).join(', ')}]`;
+      legs = sql`${parentLeg}
+    UNION ALL
+    (SELECT ${keySelect}, hit.distance, hit.matched_anchor, 1 AS leg
+       FROM (SELECT ${sql.unsafe(CHUNK_ALIAS)}.parent_key AS parent_key,
+                    (${sql.unsafe(emb)} <=> ${q}::vector) + ${margin}::float8 AS distance,
+                    ${sql.unsafe(anchor)} AS matched_anchor
+               FROM ${sql.unsafe(table)} ${sql.unsafe(CHUNK_ALIAS)}
+              WHERE ${sql.unsafe(`${CHUNK_ALIAS}.surface = '${surfaceName}'`)}
+                AND ${sql.unsafe(emb)} IS NOT NULL
+                AND (${space({ profileColumn: profile, modeColumn: modeCol })})
+                AND to_jsonb(${sql.unsafe(CHUNK_ALIAS)}.parent_key) = ANY (ARRAY(
+                      SELECT to_jsonb(${sql.unsafe(sliceKey)}) FROM ${sql.unsafe(`${SLICE_CTE} ${alias}`)}))
+           ORDER BY ${sql.unsafe(emb)} <=> ${q}::vector
+              LIMIT ${opts.limit}) hit
+       JOIN ${sql.unsafe(`${SLICE_CTE} ${alias}`)} ON hit.parent_key = ${sql.unsafe(sliceKey)})`;
+    } else {
+      // 'exact' orders by the output distance, which adds the margin: an HNSW
+      // index can only serve `ORDER BY <column> <=> <query>` itself, so this sort is
+      // exhaustive over the slice's chunks. Same order, since the margin is constant.
+      const chunkOrder = exact ? sql`distance` : sql`${sql.unsafe(emb)} <=> ${q}::vector`;
+      legs = sql`${parentLeg}
     UNION ALL
     (SELECT ${keySelect}, (${sql.unsafe(emb)} <=> ${q}::vector) + ${margin}::float8 AS distance,
             ${sql.unsafe(anchor)} AS matched_anchor, 1 AS leg
@@ -239,6 +308,7 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
         AND (${space({ profileColumn: profile, modeColumn: modeCol })})
    ORDER BY ${chunkOrder}
       LIMIT ${opts.limit})`;
+    }
   }
 
   // Parenthesised legs keep each ORDER BY/LIMIT on its own branch; without them

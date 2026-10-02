@@ -104,7 +104,7 @@ export {
   type MarkdownSection,
 } from './chunk';
 export * from './chunks/index';
-export { withIterativeScan, resetIterativeScanProbe } from './hnsw-iterative-scan';
+export { withIterativeScan, resetIterativeScanProbe, type IterativeScanOptions } from './hnsw-iterative-scan';
 export {
   createEmbeddingSpace,
   PGVECTOR_INDEX_OPERATOR_CLASS,

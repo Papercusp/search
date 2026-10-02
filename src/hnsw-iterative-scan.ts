@@ -134,6 +134,32 @@ function probeIterativeScan(sql: PgHandle, runReadOnlyTransaction?: ReadOnlyTran
   return probe;
 }
 
+/** pgvector's accepted range for `hnsw.ef_search`. */
+const EF_SEARCH_MIN = 1;
+const EF_SEARCH_MAX = 1000;
+
+export interface IterativeScanOptions {
+  runReadOnlyTransaction?: ReadOnlyTransactionRunner;
+  /**
+   * `hnsw.ef_search` for the body's transaction (pgvector default 40): the size
+   * of the candidate list each HNSW scan iteration keeps. Larger buys recall at
+   * the cost of reading more of the graph. Measured for consult's ANN chunk leg
+   * (generic-rag-chunking D-046): top-1 agreed with exact on 81/90 queries at
+   * 40, 90/90 at 100 and 200. Set with set_config(..., true), so it is
+   * transaction-local exactly like `SET LOCAL`, and applied only where iterative
+   * scan is (a server without it runs the body unchanged, as before).
+   */
+  efSearch?: number;
+}
+
+function efSearchSetting(efSearch: number | undefined): string | null {
+  if (efSearch === undefined) return null;
+  if (!Number.isInteger(efSearch) || efSearch < EF_SEARCH_MIN || efSearch > EF_SEARCH_MAX) {
+    throw new Error(`withIterativeScan: efSearch must be an integer in ${EF_SEARCH_MIN}..${EF_SEARCH_MAX}, got ${String(efSearch)}`);
+  }
+  return String(efSearch);
+}
+
 /**
  * Run `body` with HNSW iterative scanning enabled, so an ORDER BY `<=>` query
  * returns as many rows as it asked for instead of stopping at `ef_search`.
@@ -150,9 +176,11 @@ function probeIterativeScan(sql: PgHandle, runReadOnlyTransaction?: ReadOnlyTran
 export async function withIterativeScan<T>(
   sql: PgHandle,
   body: (sql: PgHandle) => Promise<T>,
-  options: { runReadOnlyTransaction?: ReadOnlyTransactionRunner } = {},
+  options: IterativeScanOptions = {},
 ): Promise<T> {
   const runReadOnlyTransaction = options.runReadOnlyTransaction;
+  // Validated before anything runs: a bad value is a caller bug, not a degrade.
+  const efSearch = efSearchSetting(options.efSearch);
   // A transaction-scoped handle (postgres.js TransactionSql, e.g. the one
   // sessions:search hands runHybridSearch) has no `begin`. Probing it threw
   // `sql.begin is not a function` on EVERY call and warned as if transient
@@ -165,7 +193,11 @@ export async function withIterativeScan<T>(
     // statement timeout, and abort handling. Run the body through it even on an
     // older server without iterative scan so the fallback query stays bounded.
     return runReadOnlyTransaction(async (tx) => {
-      if (supported) await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+      if (supported) {
+        await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+        // SET cannot take a bind parameter; set_config(..., is_local => true) can.
+        if (efSearch !== null) await tx`SELECT set_config('hnsw.ef_search', ${efSearch}, true)`;
+      }
       return body(tx);
     });
   }
@@ -175,6 +207,7 @@ export async function withIterativeScan<T>(
     // accidental write inside a search leg fail loudly rather than commit.
     await tx`SET TRANSACTION READ ONLY`;
     await tx`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+    if (efSearch !== null) await tx`SELECT set_config('hnsw.ef_search', ${efSearch}, true)`;
     return body(tx as unknown as PgHandle);
   }) as Promise<T>;
 }

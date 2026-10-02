@@ -159,3 +159,63 @@ describe('withIterativeScan capability probing', () => {
     resetIterativeScanProbe(sql);
   });
 });
+
+/** Records every statement each transaction runs, in order, with its bound values. */
+function recordingSql(): { sql: FakeSql; statements: Array<{ text: string; values: unknown[] }> } {
+  const statements: Array<{ text: string; values: unknown[] }> = [];
+  const root = vi.fn(async () => []) as unknown as FakeSql;
+  root.begin = vi.fn(async (callback: (tx: PgHandle) => Promise<unknown>) => {
+    const tx = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      statements.push({ text: strings.join('$'), values });
+      return [];
+    }) as unknown as PgHandle;
+    return callback(tx);
+  }) as unknown as PgHandle['begin'];
+  return { sql: root, statements };
+}
+
+describe('withIterativeScan efSearch (generic-rag-chunking D-046)', () => {
+  const EF = /set_config\('hnsw\.ef_search'/;
+
+  it('sets hnsw.ef_search transaction-locally, after iterative scan and before the body', async () => {
+    const { sql, statements } = recordingSql();
+    await withIterativeScan(sql, async (tx) => tx`SELECT body`, { efSearch: 100 });
+
+    const body = statements.findIndex((s) => s.text === 'SELECT body');
+    const ef = statements.findIndex((s) => EF.test(s.text));
+    const iterative = statements.map((s) => s.text).lastIndexOf('SET LOCAL hnsw.iterative_scan = relaxed_order');
+    expect(ef).toBeGreaterThan(iterative);
+    expect(body).toBeGreaterThan(ef);
+    // is_local => true is what makes it SET LOCAL; the value travels as a bind parameter.
+    expect(statements[ef]!.text).toBe("SELECT set_config('hnsw.ef_search', $, true)");
+    expect(statements[ef]!.values).toEqual(['100']);
+  });
+
+  it('sets it inside an injected read-only transaction runner too', async () => {
+    const { sql, statements } = recordingSql();
+    const runReadOnlyTransaction = vi.fn(async (body: (tx: PgHandle) => Promise<unknown>) => sql.begin(body));
+    await withIterativeScan(sql, async (tx) => tx`SELECT body`, {
+      efSearch: 200,
+      runReadOnlyTransaction: runReadOnlyTransaction as unknown as ReadOnlyTransactionRunner,
+    });
+    const ef = statements.filter((s) => EF.test(s.text));
+    expect(ef).toHaveLength(1);
+    expect(ef[0]!.values).toEqual(['200']);
+    expect(statements.findIndex((s) => s.text === 'SELECT body')).toBeGreaterThan(statements.findIndex((s) => EF.test(s.text)));
+  });
+
+  it('leaves ef_search alone when no efSearch is given', async () => {
+    const { sql, statements } = recordingSql();
+    await withIterativeScan(sql, async (tx) => tx`SELECT body`);
+    expect(statements.some((s) => EF.test(s.text))).toBe(false);
+    expect(statements.some((s) => s.text === 'SELECT body')).toBe(true);
+  });
+
+  it.each([0, 1001, 2.5, Number.NaN])('refuses efSearch %s before running anything', async (efSearch) => {
+    const { sql, statements } = recordingSql();
+    const body = vi.fn(async () => 'rows');
+    await expect(withIterativeScan(sql, body, { efSearch })).rejects.toThrow(/efSearch must be an integer in 1\.\.1000/);
+    expect(body).not.toHaveBeenCalled();
+    expect(statements).toEqual([]);
+  });
+});
