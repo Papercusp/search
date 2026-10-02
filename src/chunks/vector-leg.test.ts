@@ -108,6 +108,29 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
     expect(parentLeg).toContain('FROM chunk_leg_slice cs');
   });
 
+  // generic-rag-chunking D-047: a materialised parent vector is a detoasted copy per
+  // row that the parent leg then re-reads; the slice carries the distance instead.
+  it('materialises the parent distance, not the parent vector, in the exact slice', () => {
+    for (const chunkScan of ['ann', 'exact'] as const) {
+      const { text } = build({ chunkScan });
+      const sliceSql = text.slice(text.indexOf('WITH chunk_leg_slice AS MATERIALIZED'), text.indexOf('SELECT workspace_id, conversation_id, distance'));
+      expect(sliceSql).toMatch(/SELECT cs\.workspace_id, cs\.conversation_id, CASE WHEN cs\.query_embedding IS NOT NULL AND \(/);
+      expect(sliceSql).toMatch(/THEN cs\.query_embedding <=> \$\d+::vector END AS chunk_leg_parent_distance/);
+      // The vector and space columns are read only inside the CASE, never copied out.
+      expect(sliceSql).not.toMatch(/, cs\.query_embedding,/);
+      const parentLeg = text.slice(0, text.indexOf('UNION ALL'));
+      expect(parentLeg).toMatch(/SELECT cs\.workspace_id, cs\.conversation_id, cs\.chunk_leg_parent_distance AS distance/);
+      expect(parentLeg).toMatch(/WHERE cs\.chunk_leg_parent_distance IS NOT NULL ORDER BY cs\.chunk_leg_parent_distance LIMIT \$\d+\)/);
+    }
+  });
+
+  it("control: scan 'ann' keeps the parent leg on the table, ordered by the vector", () => {
+    const { text } = build({ scan: 'ann', chunkScan: undefined });
+    expect(text).not.toContain('chunk_leg_slice');
+    expect(text).toMatch(/FROM harness_shared\.consult_state cs WHERE/);
+    expect(text).toMatch(/ORDER BY cs\.query_embedding <=> \$\d+::vector LIMIT/);
+  });
+
   it('control: without chunkScan the exact chunk leg joins the slice and binds the surface', () => {
     const { text, params } = build();
     const leg = chunkLegOf(text);

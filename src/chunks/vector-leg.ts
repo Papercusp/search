@@ -53,6 +53,8 @@ export type ChunkLegScan = 'ann' | 'exact';
 
 /** The CTE an 'exact' leg materialises the filtered parents into. */
 const SLICE_CTE = 'chunk_leg_slice';
+/** The exact slice's precomputed parent distance (NULL: no vector / other space). */
+const SLICE_DISTANCE = 'chunk_leg_parent_distance';
 
 /** The parent's own embedding columns. */
 export interface ParentVectorColumns {
@@ -204,31 +206,46 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
   const keyNames = sql.unsafe(keys.map((k) => k.column).join(', '));
 
   // 'exact': the filter runs once, into a materialised slice that keeps the
-  // parent's own column names, so both legs read `alias.col` unchanged and no
-  // vector index can serve either ORDER BY. 'ann': both legs read the table.
-  const profileCol = pv.profileColumn ? ident(pv.profileColumn, 'parent profile column') : null;
-  const modeCol = pv.modeColumn ? ident(pv.modeColumn, 'parent mode column') : null;
-  const sliceCols = [...new Set([...keys.map((k) => k.column), ident(pv.column, 'parent vector column'), profileCol, modeCol])]
-    .filter((c): c is string => c !== null)
-    .map((c) => `${alias}.${c}`)
-    .join(', ');
+  // parent's key column names, so the chunk legs read `alias.key` unchanged and
+  // no vector index can serve either ORDER BY. The slice carries the parent's
+  // distance, computed in the same pass, rather than the parent vector: a
+  // materialised vector is a detoasted copy per row, and the parent leg would
+  // then scan the copies a second time to compute the same distance. Measured
+  // on consult (304 parents, 768 dims, generic-rag-chunking D-047): the copy
+  // cost 1.1-1.5 ms of a 5-6 ms statement. NULL marks a parent with no vector
+  // or one outside the query's space; it can still be reached by its chunks.
+  // 'ann': both legs read the table.
+  const parentSpace = space({
+    profileColumn: pv.profileColumn ? `${alias}.${ident(pv.profileColumn, 'parent profile column')}` : null,
+    modeColumn: pv.modeColumn ? `${alias}.${ident(pv.modeColumn, 'parent mode column')}` : null,
+  });
+  const sliceKeys = keys.map((k) => `${alias}.${k.column}`).join(', ');
   const slice = exact
     ? sql`WITH ${sql.unsafe(SLICE_CTE)} AS MATERIALIZED (
-        SELECT ${sql.unsafe(sliceCols)} FROM ${sql.unsafe(parentTable)} ${sql.unsafe(alias)} WHERE (${filter}))`
+        SELECT ${sql.unsafe(sliceKeys)},
+               CASE WHEN ${sql.unsafe(parentVec)} IS NOT NULL AND (${parentSpace})
+                    THEN ${sql.unsafe(parentVec)} <=> ${q}::vector END AS ${sql.unsafe(SLICE_DISTANCE)}
+          FROM ${sql.unsafe(parentTable)} ${sql.unsafe(alias)} WHERE (${filter}))`
     : sql``;
+  const sliceDistance = sql.unsafe(`${alias}.${SLICE_DISTANCE}`);
   const parentSource = sql.unsafe(`${exact ? SLICE_CTE : parentTable} ${alias}`);
   const parentWhere = exact ? sql`TRUE` : filter;
 
-  const parentLeg = sql`
+  const parentLeg = exact
+    ? sql`
+    (SELECT ${keySelect}, ${sliceDistance} AS distance,
+            NULL::text AS matched_anchor, 0 AS leg
+       FROM ${sql.unsafe(`${SLICE_CTE} ${alias}`)}
+      WHERE ${sliceDistance} IS NOT NULL
+   ORDER BY ${sliceDistance}
+      LIMIT ${opts.limit})`
+    : sql`
     (SELECT ${keySelect}, (${sql.unsafe(parentVec)} <=> ${q}::vector) AS distance,
             NULL::text AS matched_anchor, 0 AS leg
-       FROM ${parentSource}
-      WHERE (${parentWhere})
+       FROM ${sql.unsafe(`${parentTable} ${alias}`)}
+      WHERE (${filter})
         AND ${sql.unsafe(parentVec)} IS NOT NULL
-        AND (${space({
-          profileColumn: pv.profileColumn ? `${alias}.${ident(pv.profileColumn, 'parent profile column')}` : null,
-          modeColumn: pv.modeColumn ? `${alias}.${ident(pv.modeColumn, 'parent mode column')}` : null,
-        })})
+        AND (${parentSpace})
    ORDER BY ${sql.unsafe(parentVec)} <=> ${q}::vector
       LIMIT ${opts.limit})`;
 
