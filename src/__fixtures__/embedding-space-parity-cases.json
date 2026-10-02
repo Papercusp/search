@@ -282,6 +282,24 @@
     },
     {
       "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/doc-vector-seed.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/work-items-admission-census.ts",
+      "args": "'wi.embedding_profile' | 'wi.embedding_mode'",
+      "literal": {
+        "profileColumn": "wi.embedding_profile",
+        "modeColumn": "wi.embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
       "file": "packages/operator-core/lib/work-items-admission-census.ts",
       "args": "'wi.embedding_profile' | 'wi.embedding_mode'",
       "literal": {
@@ -378,7 +396,8 @@
         "proseProfilePredicateSql@packages/operator-core/lib/scout/digest-embed-cluster-leg.ts",
         "proseProfilePredicateSql@packages/operator-core/lib/scout/intent-rank-leg.ts",
         "proseProfilePredicateSql@packages/operator-core/lib/scout/semantic-novelty-leg.ts",
-        "proseProfilePredicateSql@packages/operator-core/lib/search/doc-section-overlap.ts"
+        "proseProfilePredicateSql@packages/operator-core/lib/search/doc-section-overlap.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/search/doc-vector-seed.ts"
       ]
     },
     {
