@@ -221,3 +221,61 @@ describe('withIterativeScan efSearch (generic-rag-chunking D-046)', () => {
     expect(statements).toEqual([]);
   });
 });
+
+// generic-rag-chunking D-047: the setup statements and the body's first query
+// share one round trip. Setup must still be ISSUED first, and a failing setup
+// statement must be the error reported, with no rejection left unobserved.
+describe('withIterativeScan pipelined setup (generic-rag-chunking D-047)', () => {
+  function pipelineSql(failOn?: RegExp): { sql: FakeSql; issued: string[] } {
+    const issued: string[] = [];
+    const root = vi.fn(async () => []) as unknown as FakeSql;
+    root.begin = vi.fn(async (callback: (tx: PgHandle) => Promise<unknown>) => {
+      let aborted = false;
+      const tx = vi.fn((strings: TemplateStringsArray) => {
+        const statement = strings.join('$');
+        issued.push(statement);
+        // Like the server: statements run in issue order; after a failure the
+        // transaction is aborted and every later statement fails too.
+        if (aborted) return Promise.reject(new Error('current transaction is aborted'));
+        if (failOn?.test(statement)) {
+          aborted = true;
+          return Promise.reject(new Error(`setup failed: ${statement}`));
+        }
+        return Promise.resolve([]);
+      }) as unknown as PgHandle;
+      return callback(tx);
+    }) as unknown as PgHandle['begin'];
+    return { sql: root, issued };
+  }
+
+  it('issues every setup statement before the body, without awaiting between them', async () => {
+    const { sql, issued } = pipelineSql();
+    const rows = await withIterativeScan(sql, (tx) => (tx as unknown as (s: TemplateStringsArray) => Promise<unknown>)(['SELECT body'] as unknown as TemplateStringsArray), { efSearch: 100 });
+    expect(rows).toEqual([]);
+    const bodyTx = issued.slice(issued.lastIndexOf('SET TRANSACTION READ ONLY'));
+    expect(bodyTx).toEqual([
+      'SET TRANSACTION READ ONLY',
+      'SET LOCAL hnsw.iterative_scan = relaxed_order',
+      "SELECT set_config('hnsw.ef_search', $, true)",
+      'SELECT body',
+    ]);
+  });
+
+  it('reports the failing setup statement, not the aborted body, and leaves nothing unhandled', async () => {
+    const { sql, issued } = pipelineSql(/hnsw\.ef_search/);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await expect(
+        withIterativeScan(sql, (tx) => (tx as unknown as (s: TemplateStringsArray) => Promise<unknown>)(['SELECT body'] as unknown as TemplateStringsArray), { efSearch: 100 }),
+      ).rejects.toThrow(/setup failed: SELECT set_config\('hnsw\.ef_search'/);
+      // The body was still issued (pipelined) and failed against the aborted transaction.
+      expect(issued.at(-1)).toBe('SELECT body');
+      await new Promise((r) => setTimeout(r, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+});

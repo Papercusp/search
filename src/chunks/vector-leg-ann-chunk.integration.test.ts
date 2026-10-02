@@ -215,13 +215,18 @@ describe("chunkAwareVectorLegSql chunkScan:'ann' over an exact slice (D-046)", (
   it('efSearch reaches the transaction as hnsw.ef_search, and only that transaction', async () => {
     // current_setting(..., true) reads NULL rather than erroring on a connection
     // that has not loaded the vector library yet.
-    const read = (h: postgres.Sql) => h`SELECT current_setting('hnsw.ef_search', true) AS ef`;
-    const inside = await withIterativeScan(
+    // The body's first statement is pipelined behind the setup (D-047), so it reads
+    // all three settings: a setup statement sent after it would show its default.
+    const read = (h: postgres.Sql) => h`
+      SELECT current_setting('hnsw.ef_search', true) AS ef,
+             current_setting('hnsw.iterative_scan', true) AS iterative,
+             current_setting('transaction_read_only') AS read_only`;
+    const inside = (await withIterativeScan(
       sql as never,
-      async (tx) => (await read(tx as unknown as postgres.Sql)) as unknown as Array<{ ef: string | null }>,
+      async (tx) => (await read(tx as unknown as postgres.Sql)) as unknown,
       { efSearch: 137 },
-    );
-    expect(inside[0]!.ef).toBe('137');
+    )) as Array<{ ef: string | null; iterative: string | null; read_only: string }>;
+    expect(inside[0]).toEqual({ ef: '137', iterative: 'relaxed_order', read_only: 'on' });
     for (let i = 0; i < 4; i++) {
       const after = (await read(sql)) as unknown as Array<{ ef: string | null }>;
       expect(after[0]!.ef).not.toBe('137');
