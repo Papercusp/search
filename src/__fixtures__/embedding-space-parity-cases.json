@@ -237,6 +237,33 @@
     },
     {
       "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/bench/chunk-search-ab-cli.ts",
+      "args": "'embedding_profile' | 'embedding_mode'",
+      "literal": {
+        "profileColumn": "embedding_profile",
+        "modeColumn": "embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/bench/chunk-search-ab-cli.ts",
+      "args": "'query_embedding_profile' | 'query_embedding_mode'",
+      "literal": {
+        "profileColumn": "query_embedding_profile",
+        "modeColumn": "query_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
+      "file": "packages/operator-core/lib/search/bench/chunk-search-ab-cli.ts",
+      "args": "'t.text_embedding_profile' | 't.text_embedding_mode'",
+      "literal": {
+        "profileColumn": "t.text_embedding_profile",
+        "modeColumn": "t.text_embedding_mode"
+      }
+    },
+    {
+      "fn": "proseProfilePredicateSql",
       "file": "packages/operator-core/lib/search/doc-section-overlap.ts",
       "args": "'d.embedding_profile' | 'd.embedding_mode'",
       "literal": {
@@ -396,6 +423,7 @@
         "proseProfilePredicateSql@packages/operator-core/lib/scout/digest-embed-cluster-leg.ts",
         "proseProfilePredicateSql@packages/operator-core/lib/scout/intent-rank-leg.ts",
         "proseProfilePredicateSql@packages/operator-core/lib/scout/semantic-novelty-leg.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/search/bench/chunk-search-ab-cli.ts",
         "proseProfilePredicateSql@packages/operator-core/lib/search/doc-section-overlap.ts",
         "proseProfilePredicateSql@packages/operator-core/lib/search/doc-vector-seed.ts"
       ]
@@ -428,7 +456,15 @@
       "profileColumn": "query_embedding_profile",
       "modeColumn": "query_embedding_mode",
       "from": [
-        "proseProfilePredicateSql@packages/operator-core/lib/consult/get-feedback-core.ts"
+        "proseProfilePredicateSql@packages/operator-core/lib/consult/get-feedback-core.ts",
+        "proseProfilePredicateSql@packages/operator-core/lib/search/bench/chunk-search-ab-cli.ts"
+      ]
+    },
+    {
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "from": [
+        "proseProfilePredicateSql@packages/operator-core/lib/search/bench/chunk-search-ab-cli.ts"
       ]
     },
     {
@@ -1047,6 +1083,73 @@
       "modeColumn": "query_embedding_mode",
       "expected": {
         "text": "query_embedding_profile = $1",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": null,
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "(t.text_embedding_profile = $1 OR (t.text_embedding_profile IS NULL AND t.text_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "(t.text_embedding_profile = $1 OR (t.text_embedding_profile IS NULL AND t.text_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "t.text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "selection": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "t.text_embedding_profile = $1",
         "binds": [
           "openai-text-embedding-3-small-768@v1"
         ]
@@ -2009,6 +2112,97 @@
     },
     {
       "embeddingProfile": null,
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "(t.text_embedding_profile = $1 OR (t.text_embedding_profile IS NULL AND t.text_embedding_mode = $2))",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1",
+          "gemma"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "openai-text-embedding-3-small-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "(t.text_embedding_profile = $1 OR (t.text_embedding_profile IS NULL AND t.text_embedding_mode = $2))",
+        "binds": [
+          "openai-text-embedding-3-small-768@v1",
+          "openai"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": "openai"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "t.text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "gemma-embeddinggemma-300m-768@v1",
+        "legacyMode": null
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "t.text_embedding_profile = $1",
+        "binds": [
+          "gemma-embeddinggemma-300m-768@v1"
+        ]
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "unknown-model@v1",
+        "legacyMode": "gemma"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": {
+        "profileId": "local-bge-small-en-v1.5@v1",
+        "legacyMode": "local"
+      },
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "FALSE",
+        "binds": []
+      }
+    },
+    {
+      "embeddingProfile": null,
       "profileColumn": "text_embedding_profile",
       "modeColumn": "text_embedding_mode",
       "expected": {
@@ -2316,6 +2510,21 @@
       "modeColumn": "query_embedding_mode",
       "expected": {
         "text": "CASE WHEN query_embedding_profile = ANY($1::text[]) THEN query_embedding_profile WHEN query_embedding_profile IS NULL THEN CASE WHEN query_embedding_mode = 'gemma' THEN $2 WHEN query_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
+        "binds": [
+          [
+            "gemma-embeddinggemma-300m-768@v1",
+            "openai-text-embedding-3-small-768@v1"
+          ],
+          "gemma-embeddinggemma-300m-768@v1",
+          "openai-text-embedding-3-small-768@v1"
+        ]
+      }
+    },
+    {
+      "profileColumn": "t.text_embedding_profile",
+      "modeColumn": "t.text_embedding_mode",
+      "expected": {
+        "text": "CASE WHEN t.text_embedding_profile = ANY($1::text[]) THEN t.text_embedding_profile WHEN t.text_embedding_profile IS NULL THEN CASE WHEN t.text_embedding_mode = 'gemma' THEN $2 WHEN t.text_embedding_mode = 'openai' THEN $3 ELSE NULL END ELSE NULL END",
         "binds": [
           [
             "gemma-embeddinggemma-300m-768@v1",
