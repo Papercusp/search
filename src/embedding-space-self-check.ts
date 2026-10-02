@@ -45,6 +45,40 @@ export interface SelfCheckReading {
   threshold: number;
 }
 
+/**
+ * How long a healthy pass stays trusted while none of its inputs change.
+ * After this, the check re-embeds even when everything looks the same. That
+ * covers drift no input can show, such as model files replaced under a running
+ * process.
+ */
+export const DEFAULT_SELF_CHECK_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * The last HEALTHY pass, kept by the host between ticks.
+ *
+ * Re-embedding the same text with the same embedder and comparing it with the
+ * same stored vector can only repeat the previous answer. A scheduled tick that
+ * does it anyway loads the embedding model on a host that is otherwise idle,
+ * and that model is the largest piece of memory such a host holds. Measured on
+ * a capacity VM (2026-10-02, WI-10005523): a 15-minute self-check tick
+ * reloaded the model on every idle Server, so an idle unload could never stay
+ * unloaded.
+ */
+export interface SelfCheckMemo {
+  last: {
+    embedderIdentity: string;
+    keyLabel: string;
+    body: string;
+    storedVector: string;
+    distance: number;
+    atMs: number;
+  } | null;
+}
+
+export function createSelfCheckMemo(): SelfCheckMemo {
+  return { last: null };
+}
+
 export interface StoredRowSelfCheckDeps {
   /** The active embedder. */
   embed(text: string): Promise<readonly number[]>;
@@ -56,11 +90,34 @@ export interface StoredRowSelfCheckDeps {
   clear?(reading: SelfCheckReading): Promise<unknown> | unknown;
   /** Cosine-distance alert threshold. Default {@link DEFAULT_DESYNC_DISTANCE_THRESHOLD}. */
   threshold?: number;
+  /**
+   * Everything that decides the embedder's output space (backend, model,
+   * revision, width). Must change whenever the vectors it produces could
+   * change. With `memo`, it turns on the unchanged-inputs skip; without it,
+   * every tick re-embeds.
+   */
+  embedderIdentity?: string;
+  /** Last healthy pass, owned by the host. See {@link SelfCheckMemo}. */
+  memo?: SelfCheckMemo;
+  /** Default {@link DEFAULT_SELF_CHECK_MAX_AGE_MS}. */
+  maxAgeMs?: number;
+  /** Clock, for tests. */
+  now?: () => number;
 }
 
 export type StoredRowSelfCheckResult =
   | { ok: true; status: 'healthy' | 'desync'; keyLabel: string; distance: number }
   | { ok: true; skipped: 'no_row_in_active_space' }
+  | {
+      ok: true;
+      /** Same embedder, same row, same text, same stored vector as the last
+       * healthy pass, within `maxAgeMs`. Nothing was embedded and no sink ran;
+       * `distance` is the remembered reading. */
+      skipped: 'unchanged_since_last_pass';
+      keyLabel: string;
+      distance: number;
+      checkedAtMs: number;
+    }
   | { ok: false; skipped: 'canary_read_failed' | 'embed_failed'; keyLabel?: string };
 
 /** Parse a pgvector `::text` literal ("[0.1,0.2,...]") into numbers. */
@@ -95,9 +152,15 @@ export function isEmbeddingDesync(distance: number, threshold: number = DEFAULT_
   return !(distance <= threshold);
 }
 
+function storedVectorKey(v: SelfCheckCanary['storedVector']): string {
+  return typeof v === 'string' ? v : JSON.stringify(v);
+}
+
 /** One self-check tick. Never throws. */
 export async function runStoredRowSelfCheck(deps: StoredRowSelfCheckDeps): Promise<StoredRowSelfCheckResult> {
   const threshold = deps.threshold ?? DEFAULT_DESYNC_DISTANCE_THRESHOLD;
+  const now = deps.now ?? Date.now;
+  const memo = deps.embedderIdentity === undefined ? undefined : deps.memo;
 
   let canary: SelfCheckCanary | null;
   try {
@@ -107,10 +170,30 @@ export async function runStoredRowSelfCheck(deps: StoredRowSelfCheckDeps): Promi
   }
   if (!canary) return { ok: true, skipped: 'no_row_in_active_space' };
 
+  const storedKey = storedVectorKey(canary.storedVector);
+  const last = memo?.last;
+  if (
+    last &&
+    last.embedderIdentity === deps.embedderIdentity &&
+    last.keyLabel === canary.keyLabel &&
+    last.body === canary.body &&
+    last.storedVector === storedKey &&
+    now() - last.atMs < (deps.maxAgeMs ?? DEFAULT_SELF_CHECK_MAX_AGE_MS)
+  ) {
+    return {
+      ok: true,
+      skipped: 'unchanged_since_last_pass',
+      keyLabel: canary.keyLabel,
+      distance: last.distance,
+      checkedAtMs: last.atMs,
+    };
+  }
+
   let fresh: readonly number[];
   try {
     fresh = await deps.embed(canary.body);
   } catch {
+    if (memo) memo.last = null;
     return { ok: false, skipped: 'embed_failed', keyLabel: canary.keyLabel };
   }
 
@@ -122,6 +205,20 @@ export async function runStoredRowSelfCheck(deps: StoredRowSelfCheckDeps): Promi
     await (desync ? deps.alert(reading) : deps.clear?.(reading));
   } catch {
     /* a sink failure must never fail the tick */
+  }
+  // Only a healthy pass is remembered: after a desync every tick re-checks, so
+  // the clear sink runs as soon as the space is healthy again.
+  if (memo) {
+    memo.last = desync
+      ? null
+      : {
+          embedderIdentity: deps.embedderIdentity!,
+          keyLabel: canary.keyLabel,
+          body: canary.body,
+          storedVector: storedKey,
+          distance,
+          atMs: now(),
+        };
   }
   return { ok: true, status: desync ? 'desync' : 'healthy', keyLabel: canary.keyLabel, distance };
 }

@@ -118,11 +118,14 @@ export {
 } from './embedding-space';
 export {
   DEFAULT_DESYNC_DISTANCE_THRESHOLD,
+  DEFAULT_SELF_CHECK_MAX_AGE_MS,
   cosineDistance,
+  createSelfCheckMemo,
   isEmbeddingDesync,
   parseVectorText,
   runStoredRowSelfCheck,
   type SelfCheckCanary,
+  type SelfCheckMemo,
   type SelfCheckReading,
   type StoredRowSelfCheckDeps,
   type StoredRowSelfCheckResult,

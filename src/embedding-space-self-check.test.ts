@@ -15,7 +15,9 @@ import * as realSubject from './embedding-space-self-check';
 const subjectPath = process.env.PAPERCUSP_SEARCH_SELF_CHECK_SUBJECT;
 const {
   DEFAULT_DESYNC_DISTANCE_THRESHOLD,
+  DEFAULT_SELF_CHECK_MAX_AGE_MS,
   cosineDistance,
+  createSelfCheckMemo,
   isEmbeddingDesync,
   parseVectorText,
   runStoredRowSelfCheck,
@@ -104,6 +106,107 @@ describe('runStoredRowSelfCheck — never throws', () => {
       alert: () => { throw new Error('sink down'); },
     });
     expect(r).toMatchObject({ ok: true, status: 'desync' });
+  });
+});
+
+describe('runStoredRowSelfCheck — unchanged inputs do not wake the embedder (WI-10005523)', () => {
+  // A scheduled tick that re-embeds the same text with the same embedder only
+  // repeats the last answer, and on an idle host it reloads the embedding model.
+  function harness(opts: { fresh?: readonly number[]; identity?: string; maxAgeMs?: number } = {}) {
+    const memo = createSelfCheckMemo();
+    let nowMs = 1_000_000;
+    let row: SelfCheckCanary = canary;
+    let identity: string | undefined = 'identity' in opts ? opts.identity : 'local|model@r1|384';
+    let fresh: readonly number[] = opts.fresh ?? STORED;
+    const embed = vi.fn(async () => fresh);
+    const alert = vi.fn();
+    const clear = vi.fn();
+    const tick = () =>
+      runStoredRowSelfCheck({
+        embed,
+        pickCanary: async () => row,
+        alert,
+        clear,
+        memo,
+        embedderIdentity: identity,
+        maxAgeMs: opts.maxAgeMs,
+        now: () => nowMs,
+      });
+    return {
+      memo, embed, alert, clear, tick,
+      advance: (ms: number) => { nowMs += ms; },
+      setRow: (r: SelfCheckCanary) => { row = r; },
+      setIdentity: (i: string | undefined) => { identity = i; },
+      setFresh: (f: readonly number[]) => { fresh = f; },
+    };
+  }
+
+  it('a second tick with the same embedder, row, text and stored vector skips the embed and the sinks', async () => {
+    const h = harness();
+    expect(await h.tick()).toMatchObject({ ok: true, status: 'healthy', distance: 0 });
+    h.advance(15 * 60_000);
+    expect(await h.tick()).toEqual({
+      ok: true,
+      skipped: 'unchanged_since_last_pass',
+      keyLabel: canary.keyLabel,
+      distance: 0,
+      checkedAtMs: 1_000_000,
+    });
+    expect(h.embed).toHaveBeenCalledTimes(1);
+    expect(h.clear).toHaveBeenCalledTimes(1);
+    expect(h.alert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a newer canary row', (h: ReturnType<typeof harness>) => h.setRow({ ...canary, keyLabel: 'harness_shared.t#2' })],
+    ['edited row text', (h: ReturnType<typeof harness>) => h.setRow({ ...canary, body: 'row text, edited' })],
+    ['a rewritten stored vector', (h: ReturnType<typeof harness>) => h.setRow({ ...canary, storedVector: '[1,0.0001]' })],
+    ['a different embedder identity', (h: ReturnType<typeof harness>) => h.setIdentity('local|model@r2|384')],
+  ])('%s re-embeds', async (_label, change) => {
+    const h = harness();
+    await h.tick();
+    change(h);
+    expect(await h.tick()).toMatchObject({ ok: true, status: 'healthy' });
+    expect(h.embed).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-embeds once the remembered pass is maxAgeMs old, even with identical inputs', async () => {
+    const h = harness();
+    await h.tick();
+    h.advance(DEFAULT_SELF_CHECK_MAX_AGE_MS - 1);
+    expect(await h.tick()).toMatchObject({ skipped: 'unchanged_since_last_pass' });
+    h.advance(1);
+    expect(await h.tick()).toMatchObject({ status: 'healthy' });
+    expect(h.embed).toHaveBeenCalledTimes(2);
+  });
+
+  it('a desync is never remembered: the next tick re-checks so a recovery clears the alert', async () => {
+    const h = harness({ fresh: [0, 1] });
+    expect(await h.tick()).toMatchObject({ status: 'desync' });
+    expect(h.memo.last).toBeNull();
+    h.setFresh(STORED);
+    expect(await h.tick()).toMatchObject({ status: 'healthy' });
+    expect(h.embed).toHaveBeenCalledTimes(2);
+    expect(h.alert).toHaveBeenCalledTimes(1);
+    expect(h.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed embed forgets the last pass', async () => {
+    const h = harness();
+    await h.tick();
+    h.embed.mockRejectedValueOnce(new Error('backend down'));
+    h.advance(DEFAULT_SELF_CHECK_MAX_AGE_MS);
+    expect(await h.tick()).toMatchObject({ ok: false, skipped: 'embed_failed' });
+    expect(h.memo.last).toBeNull();
+    expect(await h.tick()).toMatchObject({ status: 'healthy' });
+  });
+
+  it('without an embedder identity the memo is ignored and every tick re-embeds', async () => {
+    const h = harness({ identity: undefined });
+    await h.tick();
+    await h.tick();
+    expect(h.embed).toHaveBeenCalledTimes(2);
+    expect(h.memo.last).toBeNull();
   });
 });
 
