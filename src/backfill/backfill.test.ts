@@ -345,6 +345,31 @@ describe('createBackfillSweeper', () => {
     expect(sw.lastResult()).toBe(r);
   });
 
+  it('continues to the next target after a batch contains a failing row (R-10)', async () => {
+    const tables = { 's.a': { rows: rows('a1', 'BAD') }, 's.b': { rows: rows('b1') } };
+    const embed = vi.fn(async (text: string) => {
+      if (text === 'BAD') throw new Error('bad input');
+      return [1, 2, 3];
+    });
+    const embedMany = vi.fn(async (texts: string[]) => {
+      if (texts.includes('BAD')) throw new Error('bad input in batch');
+      return texts.map(() => [1, 2, 3]);
+    });
+    const { sw } = sweeper(tables, {
+      batchSize: 2,
+      resolveEmbedder: async () => ({ mode: 'm1', dims: 3, embed, embedMany }),
+    });
+
+    expect(plain(await sw.run({ maxRowsPerTarget: 2 }))).toEqual([
+      { table: 's.a', scanned: 2, embedded: 1, errors: 1 },
+      { table: 's.b', scanned: 1, embedded: 1, errors: 0 },
+    ]);
+    expect(embedMany).toHaveBeenCalledWith(['a1', 'BAD']);
+    expect(embed.mock.calls.map((call) => call[0])).toEqual(['a1', 'BAD', 'b1']);
+    expect(tables['s.a'].rows.map((row) => row.stale)).toEqual([false, true]);
+    expect(tables['s.b'].rows[0]?.stale).toBe(false);
+  });
+
   it('rotates which target leads each sweep', async () => {
     const tables = { 's.a': { rows: rows('a1', 'a2') }, 's.b': { rows: rows('b1', 'b2') } };
     const { sw, embed } = sweeper(tables);
