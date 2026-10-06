@@ -82,7 +82,14 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
   options: BackfillTableOptions<P>,
 ): Promise<BackfillStats> {
   const started = Date.now();
-  const stats: BackfillStats = { table: target.table, scanned: 0, embedded: 0, errors: 0, durationMs: 0 };
+  const stats: BackfillStats = {
+    table: target.table,
+    scanned: 0,
+    embedded: 0,
+    errors: 0,
+    writeSkipped: 0,
+    durationMs: 0,
+  };
   const {
     embed,
     embedMany,
@@ -143,11 +150,20 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
   if (recipeAware) setClauses.push(`${recipeColOf(target)} = ${updRecipeExpr}`);
   const profileTerm = (profileExpr: string | null) =>
     profileAware ? { profileExpr: profileExpr!, legacyModeCompatible: profileSelection!.legacyMode === mode } : undefined;
-  // The write guard is BUILT FROM the staleness predicate, never restated.
+  // The write never WAITS for a row lock. The subquery locks the row only if no one
+  // else holds it (SKIP LOCKED); a row held by another writer, e.g. a long bulk
+  // UPDATE of the same table, matches nothing and is skipped at once. Without it a
+  // single write waited out the other statement or the role's lock_timeout, and the
+  // sweep, which writes one row at a time, spent nearly all of its time waiting
+  // (WI-10006735). The guard stays LAST: it is the whole staleness predicate, BUILT
+  // FROM the one the SELECT uses, never restated.
+  const keyTuple = `(${keyCols.join(', ')})`;
   const updateSql =
     `UPDATE ${target.table}` +
     `\n   SET ${setClauses.join(', ')}` +
     `\n WHERE ${whereKeys}` +
+    `\n   AND ${keyTuple} IN (SELECT ${keyCols.join(', ')} FROM ${target.table}` +
+    ` WHERE ${whereKeys} FOR NO KEY UPDATE SKIP LOCKED)` +
     `\n   AND ${stalePredicateSql(target, spaceAware, updModeExpr, updRecipeExpr, profileTerm(updProfileExpr))}`;
   const labelParams = [
     ...(spaceAware ? [mode] : []),
@@ -156,9 +172,10 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
   ];
   const stale = stalePredicateSql(target, spaceAware, selModeExpr, selRecipeExpr, profileTerm(selProfileExpr));
 
-  // Rows that FAIL stay stale, so with a stable order they would head every later
-  // pull. OFFSET by the running failure count skips exactly them. A value cursor on
-  // the order column would instead skip every row tied with the boundary value.
+  // Rows that FAIL, and rows whose write was skipped because another writer held
+  // them, stay stale, so with a stable order they would head every later pull.
+  // OFFSET by their running count skips exactly them. A value cursor on the order
+  // column would instead skip every row tied with the boundary value.
   let failedSoFar = 0;
   let warnedBatchFallback = false;
   const orderBy = target.orderBySql ? ` ORDER BY ${target.orderBySql}` : '';
@@ -216,6 +233,7 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
 
     let embeddedThisBatch = 0;
     let failedThisBatch = 0;
+    let skippedThisBatch = 0;
     for (const [i, row] of batch.entries()) {
       stats.scanned += 1;
       try {
@@ -228,7 +246,13 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
         const keyVals = keyCols.map((_, k) => row[`k${k}`]);
         // By key, under the staleness guard: a row another sweep already brought
         // current is left alone. Vector and labels are written together.
-        await sql.unsafe(updateSql, [`[${vec.join(',')}]`, ...labelParams, ...keyVals]);
+        const written = await sql.unsafe(updateSql, [`[${vec.join(',')}]`, ...labelParams, ...keyVals]);
+        if (affectedRows(written) === 0) {
+          // Held by another writer, or already brought current by one.
+          stats.writeSkipped += 1;
+          skippedThisBatch += 1;
+          continue;
+        }
         stats.embedded += 1;
         embeddedThisBatch += 1;
       } catch {
@@ -236,11 +260,20 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
         failedThisBatch += 1;
       }
     }
-    failedSoFar += failedThisBatch;
-    // Nothing in this batch embedded: what remains is persistent failure. Stop.
+    failedSoFar += failedThisBatch + skippedThisBatch;
+    // Nothing in this batch written: what remains is persistent failure, or rows a
+    // long writer still holds. Stop; a later pull retries them.
     if (embeddedThisBatch === 0) break;
   }
 
   stats.durationMs = Date.now() - started;
   return stats;
+}
+
+/** Rows a write changed: postgres.js's `count`. A client that reports none (a test
+ * double) is taken as having written the row, which is how every write was counted
+ * before the engine read the count. */
+function affectedRows(result: unknown): number {
+  const count = (result as { count?: unknown } | null | undefined)?.count;
+  return typeof count === 'number' ? count : 1;
 }

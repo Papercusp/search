@@ -116,6 +116,7 @@ const zeroStats = (table: string, errors = 0): BackfillStats => ({
   scanned: 0,
   embedded: 0,
   errors,
+  writeSkipped: 0,
   durationMs: 0,
 });
 
@@ -267,6 +268,7 @@ export function createBackfillSweeper<P extends BackfillProfile = BackfillProfil
             acc.scanned += s.scanned;
             acc.embedded += s.embedded;
             acc.errors += s.errors;
+            acc.writeSkipped += s.writeSkipped;
             acc.durationMs += s.durationMs;
             if (s.embedded === 0) drained.add(target.table);
           } catch (err) {

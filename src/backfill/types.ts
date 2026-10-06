@@ -52,8 +52,13 @@ export interface BackfillTarget {
 export interface BackfillStats {
   table: string;
   scanned: number;
+  /** Rows written. */
   embedded: number;
   errors: number;
+  /** Rows embedded but not written: the row's lock was held by another writer, so
+   * the write skipped it instead of waiting, or another writer had already brought
+   * it current. A held row stays stale and a later pull retries it. */
+  writeSkipped: number;
   durationMs: number;
 }
 
