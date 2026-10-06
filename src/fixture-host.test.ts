@@ -347,9 +347,11 @@ describe('fixture host: backfill engine', () => {
     if (!Array.isArray(result)) throw new Error(`sweep skipped: ${result.skipped}`);
     const stats = result.map(({ durationMs: _d, ...s }) => s);
     expect(stats).toEqual([
-      { table: 'herbarium.sheets', scanned: 2, embedded: 2, errors: 0 },
-      { table: 'herbarium.labels', scanned: 0, embedded: 0, errors: 0 },
-      { table: 'herbarium.loans', scanned: 0, embedded: 0, errors: 0 },
+      // writeSkipped counts rows whose guarded write found the row locked by another writer
+      // (SKIP LOCKED); this fixture has a single writer, so it is 0 on every target.
+      { table: 'herbarium.sheets', scanned: 2, embedded: 2, errors: 0, writeSkipped: 0 },
+      { table: 'herbarium.labels', scanned: 0, embedded: 0, errors: 0, writeSkipped: 0 },
+      { table: 'herbarium.loans', scanned: 0, embedded: 0, errors: 0, writeSkipped: 0 },
     ]);
     expect(embedded).toEqual(['Quercus alba, north ridge', 'Salix nigra, river bend']);
 
