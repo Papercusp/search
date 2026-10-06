@@ -35,6 +35,8 @@ interface FakeRow {
   stale: boolean;
   vec?: string;
   labels?: unknown[];
+  /** Another writer holds this row's lock: a SKIP LOCKED write matches nothing. */
+  locked?: boolean;
 }
 interface FakeTable {
   rows: FakeRow[];
@@ -76,12 +78,20 @@ function fakeDb(tables: Record<string, FakeTable>, opts: { vector?: boolean } = 
       }
       if (query.trimStart().startsWith('UPDATE')) {
         const row = t.rows.find((r) => r.key === params[params.length - 1]);
-        if (row && row.stale) {
+        // A held row is skipped only by a write that asks to skip it; any other
+        // write would wait for it, which this fake reports as an error.
+        if (row?.locked && !query.includes('SKIP LOCKED')) {
+          return Promise.reject(new Error('canceling statement due to lock timeout'));
+        }
+        let count = 0;
+        if (row && row.stale && !row.locked) {
           row.stale = false;
           row.vec = String(params[0]);
           row.labels = params.slice(1, -1);
+          count = 1;
         }
-        return Promise.resolve([] as T);
+        // postgres.js reports the affected-row count on the result.
+        return Promise.resolve(Object.assign([], { count }) as T);
       }
       return Promise.reject(new Error(`unexpected statement: ${query.slice(0, 40)}`));
     },
@@ -261,6 +271,46 @@ describe('backfillTable', () => {
     expect(s2).toMatchObject({ scanned: 2, embedded: 0, errors: 2 });
   });
 
+  it('a row another writer holds is skipped without waiting, offset past, and not counted as written or failed', async () => {
+    const table = { rows: rows('a', 'held', 'c', 'd') };
+    table.rows[1]!.locked = true;
+    const db = fakeDb({ 's.t': table });
+    const s = await backfillTable(db.sql, target('s.t'), { ...base, batchSize: 2, embed: vec3 });
+    // pull 1 (offset 0): a, held · pull 2 (offset 1, past the held row): c, d · pull 3 (offset 1): nothing
+    const offsets = db.calls.filter((c) => c.query.trimStart().startsWith('SELECT')).map((c) => c.params.at(-1));
+    expect(offsets).toEqual([0, 1, 1]);
+    expect(s).toMatchObject({ scanned: 4, embedded: 3, errors: 0, writeSkipped: 1 });
+    expect(table.rows.map((r) => r.stale)).toEqual([false, true, false, false]);
+
+    // Every row held: one pull, nothing written, and the call stops instead of spinning.
+    const allHeld = { rows: rows('x', 'y') };
+    for (const r of allHeld.rows) r.locked = true;
+    const db2 = fakeDb({ 's.t': allHeld });
+    const s2 = await backfillTable(db2.sql, target('s.t'), { ...base, batchSize: 2, embed: vec3 });
+    expect(db2.calls.filter((c) => c.query.trimStart().startsWith('SELECT'))).toHaveLength(1);
+    expect(s2).toMatchObject({ scanned: 2, embedded: 0, errors: 0, writeSkipped: 2 });
+  });
+
+  it('the write locks its row with SKIP LOCKED and keeps the staleness guard as its last clause', async () => {
+    const db = fakeDb({ 's.t': { rows: rows('a') } });
+    await backfillTable(db.sql, target('s.t'), { ...base, embed: vec3 });
+    const update = db.calls.find((c) => c.query.startsWith('UPDATE'))!.query.replace(/\s+/g, ' ');
+    expect(update).toContain('AND (id) IN (SELECT id FROM s.t WHERE id = $3 FOR NO KEY UPDATE SKIP LOCKED)');
+    expect(update.endsWith(stalePredicateSql(target('s.t'), true, '$2'))).toBe(true);
+  });
+
+  it('a client that reports no affected-row count is taken as having written the row', async () => {
+    const calls: string[] = [];
+    const sql = {
+      unsafe: async (q: string) => {
+        calls.push(q);
+        return calls.length === 1 ? [{ k0: 'r0', body: 'a' }] : [];
+      },
+    } as unknown as BackfillSql;
+    const s = await backfillTable(sql, target('s.t'), { ...base, embed: vec3 });
+    expect(s).toMatchObject({ scanned: 1, embedded: 1, writeSkipped: 0 });
+  });
+
   it('stops at maxRows (default 4 batches)', async () => {
     const db = fakeDb({ 's.t': { rows: rows(...'abcdefghij'.split('')) } });
     expect((await backfillTable(db.sql, target('s.t'), { ...base, batchSize: 2, embed: vec3 })).scanned).toBe(8);
@@ -331,7 +381,7 @@ describe('createBackfillSweeper', () => {
     });
     return { sw, db, log, embed };
   };
-  const zero = (table: string) => ({ table, scanned: 0, embedded: 0, errors: 0 });
+  const zero = (table: string) => ({ table, scanned: 0, embedded: 0, errors: 0, writeSkipped: 0 });
   const plain = (r: unknown) => (r as Array<Record<string, unknown>>).map(({ durationMs: _d, ...s }) => s);
 
   it('drains live targets round-robin, one batch each per round, results in canonical order', async () => {
@@ -339,10 +389,19 @@ describe('createBackfillSweeper', () => {
     const r = await sw.run();
     expect(embed.mock.calls.map((c) => c[0])).toEqual(['a1', 'b1', 'a2', 'b2', 'b3']);
     expect(plain(r)).toEqual([
-      { table: 's.a', scanned: 2, embedded: 2, errors: 0 },
-      { table: 's.b', scanned: 3, embedded: 3, errors: 0 },
+      { table: 's.a', scanned: 2, embedded: 2, errors: 0, writeSkipped: 0 },
+      { table: 's.b', scanned: 3, embedded: 3, errors: 0, writeSkipped: 0 },
     ]);
     expect(sw.lastResult()).toBe(r);
+  });
+
+  it('sums writeSkipped per target and drains a target whose only remaining row is held', async () => {
+    const a = { rows: rows('a1', 'a2') };
+    a.rows[0]!.locked = true;
+    const { sw, embed } = sweeper({ 's.a': a }, { batchSize: 2 });
+    // round 1: a1 held (skipped), a2 written · round 2: a1 still held, nothing written → drained
+    expect(plain(await sw.run())).toEqual([{ table: 's.a', scanned: 3, embedded: 1, errors: 0, writeSkipped: 2 }]);
+    expect(embed.mock.calls.map((c) => c[0])).toEqual(['a1', 'a2', 'a1']);
   });
 
   it('continues to the next target after a batch contains a failing row (R-10)', async () => {
@@ -361,8 +420,8 @@ describe('createBackfillSweeper', () => {
     });
 
     expect(plain(await sw.run({ maxRowsPerTarget: 2 }))).toEqual([
-      { table: 's.a', scanned: 2, embedded: 1, errors: 1 },
-      { table: 's.b', scanned: 1, embedded: 1, errors: 0 },
+      { table: 's.a', scanned: 2, embedded: 1, errors: 1, writeSkipped: 0 },
+      { table: 's.b', scanned: 1, embedded: 1, errors: 0, writeSkipped: 0 },
     ]);
     expect(embedMany).toHaveBeenCalledWith(['a1', 'BAD']);
     expect(embed.mock.calls.map((call) => call[0])).toEqual(['a1', 'BAD', 'b1']);
@@ -411,7 +470,11 @@ describe('createBackfillSweeper', () => {
       { 's.a': { rows: rows('a1'), dims: 5 }, 's.b': { rows: rows('b1'), absent: true }, 's.c': { rows: rows('c1') } },
       { widthSkewHint: 'Run the width migration.' },
     );
-    expect(plain(await sw.run())).toEqual([zero('s.a'), zero('s.b'), { table: 's.c', scanned: 1, embedded: 1, errors: 0 }]);
+    expect(plain(await sw.run())).toEqual([
+      zero('s.a'),
+      zero('s.b'),
+      { table: 's.c', scanned: 1, embedded: 1, errors: 0, writeSkipped: 0 },
+    ]);
     expect(embed.mock.calls.map((c) => c[0])).toEqual(['c1']);
     const skew = log.lines.find((l) => l.includes('SCHEMA WIDTH SKEW'))!;
     expect(skew).toContain('[bf] SCHEMA WIDTH SKEW — refusing s.a.embedding: it is vector(5) but this code emits 3.');

@@ -228,6 +228,58 @@ describe('backfill sweep on PostgreSQL', () => {
     ]);
   });
 
+  it('skips a row another transaction holds instead of waiting for it, and writes it once released (WI-10006735)', async () => {
+    await sql.unsafe(`
+      CREATE TABLE ${S}.held (
+        id text PRIMARY KEY, body text, embedding vector(${DIMS}), embedding_mode text, created_at timestamptz NOT NULL);
+      INSERT INTO ${S}.held VALUES
+        ('h1', 'held one', NULL, NULL, '2026-01-01T00:00:00Z'),
+        ('h2', 'held two (locked by another transaction)', NULL, NULL, '2026-01-02T00:00:00Z'),
+        ('h3', 'held three', NULL, NULL, '2026-01-03T00:00:00Z');`);
+    // A write that WAITED for h2 would end in this lock_timeout and count as an error.
+    const sweepSql = postgres(inject('searchPgUrl'), { max: 1, onnotice: () => {}, connection: { lock_timeout: 3000 } });
+    const holder = postgres(inject('searchPgUrl'), { max: 1, onnotice: () => {} });
+    const sweeper = createBackfillSweeper({
+      getTargets: () => [{ table: `${S}.held`, embedCol: 'embedding', bodySql: 'body', keyCols: ['id'], orderBySql: 'created_at' }],
+      getSql: () => sweepSql,
+      resolveEmbedder: async () => ({ mode: 'm', dims: DIMS, embed: async (text: string) => vectorFor(text) }),
+      acceptsWidth: (d) => d === DIMS,
+      batchSize: 10,
+      maxInputChars: 8000,
+      logger,
+    });
+    const pick = (r: unknown) =>
+      (r as Array<{ table: string; scanned: number; embedded: number; errors: number; writeSkipped: number }>).map(
+        ({ scanned, embedded, errors, writeSkipped }) => ({ scanned, embedded, errors, writeSkipped }),
+      );
+    const written = async () =>
+      (await sql.unsafe<Array<{ id: string }>>(`SELECT id FROM ${S}.held WHERE embedding IS NOT NULL ORDER BY id`)).map((r) => r.id);
+
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((resolve) => (signalLocked = resolve));
+    const tx = holder.begin(async (t) => {
+      await t.unsafe(`SELECT 1 FROM ${S}.held WHERE id = 'h2' FOR UPDATE`);
+      signalLocked();
+      await released;
+    });
+    try {
+      await locked;
+      // Round 1 writes h1 and h3 and skips h2; round 2 finds only h2, still held, and drains.
+      expect(pick(await sweeper.run())).toEqual([{ scanned: 4, embedded: 2, errors: 0, writeSkipped: 2 }]);
+      expect(await written()).toEqual(['h1', 'h3']);
+    } finally {
+      release();
+      await tx;
+    }
+    // Released: the next sweep writes it.
+    expect(pick(await sweeper.run())).toEqual([{ scanned: 1, embedded: 1, errors: 0, writeSkipped: 0 }]);
+    expect(await written()).toEqual(['h1', 'h2', 'h3']);
+    await holder.end();
+    await sweepSql.end();
+  });
+
   it('refuses a column whose live width is not the stored width, measured from the catalog', async () => {
     await sql.unsafe(`CREATE TABLE ${S}.wide (id text PRIMARY KEY, body text, embedding vector(4), embedding_mode text)`);
     await sql.unsafe(`INSERT INTO ${S}.wide VALUES ('w1', 'wide', NULL, NULL)`);
