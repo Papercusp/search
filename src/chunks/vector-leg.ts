@@ -323,20 +323,30 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
       //   - nothing else in the inner query is ordered or joined.
       // The LIMIT stays inside, so the join back to the slice (for the parent's
       // typed key columns) reads at most `chunkCandidates` rows.
+      //
+      // The distance is computed ONCE, as the raw operator value the inner query
+      // orders by (the margin is added outside). Ordering by the operator
+      // expression while reporting `operator + margin` makes Postgres evaluate
+      // `<=>` twice per row, and each evaluation detoasts the stored vector. A small
+      // surface never takes the HNSW path (the planner sorts exactly), so that cost
+      // falls on every chunk row: on consult (395 chunks, 768 dims, generic-rag-chunking
+      // D-052) it was 3,558 buffer hits and 3.7 ms p50 against 1,978 and 2.5 ms once.
+      // Ordering by the output column keeps the HNSW index usable: the sort key is
+      // still the bare operator expression.
       const sliceKey = `ARRAY[${keys.map((k) => `(${alias}.${k.column})::text`).join(', ')}]`;
       const chunkFilter = opts.chunkFilter ?? sql`TRUE`;
       legs = sql`${parentLeg}
     UNION ALL
-    (SELECT ${keySelect}, hit.distance, hit.matched_anchor, 1 AS leg
+    (SELECT ${keySelect}, hit.distance + ${margin}::float8 AS distance, hit.matched_anchor, 1 AS leg
        FROM (SELECT ${sql.unsafe(CHUNK_ALIAS)}.parent_key AS parent_key,
-                    (${sql.unsafe(emb)} <=> ${q}::vector) + ${margin}::float8 AS distance,
+                    ${sql.unsafe(emb)} <=> ${q}::vector AS distance,
                     ${sql.unsafe(anchor)} AS matched_anchor
                FROM ${sql.unsafe(table)} ${sql.unsafe(CHUNK_ALIAS)}
               WHERE ${sql.unsafe(`${CHUNK_ALIAS}.surface = '${surfaceName}'`)}
                 AND ${sql.unsafe(emb)} IS NOT NULL
                 AND (${space({ profileColumn: profile, modeColumn: modeCol })})
                 AND (${chunkFilter})
-           ORDER BY ${sql.unsafe(emb)} <=> ${q}::vector
+           ORDER BY distance
               LIMIT ${chunkCandidates}) hit
        JOIN ${sql.unsafe(`${SLICE_CTE} ${alias}`)} ON hit.parent_key = ${sql.unsafe(sliceKey)})`;
     } else {

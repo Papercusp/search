@@ -10,7 +10,8 @@
  *   2. the chunk leg reads the chunk table alone, never the slice: membership
  *      is the join back to the slice after the LIMIT (D-048; D-046's in-scan
  *      jsonb membership filter forced an iterative scan and cost ~8 ms);
- *   3. the chunk leg orders by the vector operator itself.
+ *   3. the chunk leg orders by the bare vector operator value, computed once per
+ *      row (D-052: a second evaluation detoasts every stored vector again).
  * The integration test (vector-leg-ann-chunk.integration.test.ts) checks that
  * real Postgres then uses the index and returns the right parents.
  */
@@ -112,7 +113,7 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
     );
     const leg = chunkLegOf(text);
     const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
-    const filter = inner.match(/AND \(c\.parent_key\[1\] = \$(\d+)\) ORDER BY c\.embedding <=> \$\d+::vector LIMIT \$(\d+)$/);
+    const filter = inner.match(/AND \(c\.parent_key\[1\] = \$(\d+)\) ORDER BY distance LIMIT \$(\d+)$/);
     expect(filter, inner).not.toBeNull();
     expect(params[Number(filter![1]) - 1]).toBe('ws-1');
     expect(params[Number(filter![2]) - 1]).toBe(40);
@@ -122,7 +123,7 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
     const { text, params } = build({ chunkScan: 'ann', limit: 7 });
     const leg = chunkLegOf(text);
     const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
-    const m = inner.match(/AND \(TRUE\) ORDER BY c\.embedding <=> \$\d+::vector LIMIT \$(\d+)$/);
+    const m = inner.match(/AND \(TRUE\) ORDER BY distance LIMIT \$(\d+)$/);
     expect(m, inner).not.toBeNull();
     expect(params[Number(m![1]) - 1]).toBe(7);
   });
@@ -134,11 +135,24 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
     expect(() => build({ chunkScan: 'ann', chunkCandidates: 0 })).toThrow(/chunkCandidates must be a positive integer/);
   });
 
-  it('orders the chunk leg by the vector operator, so an HNSW index can serve it', () => {
+  it('orders the chunk leg by the bare vector operator, so an HNSW index can serve it', () => {
     const leg = chunkLegOf(build({ chunkScan: 'ann' }).text);
-    expect(leg).toMatch(/ORDER BY c\.embedding <=> \$\d+::vector LIMIT \$\d+\) hit/);
-    // The margin is still added to the reported distance.
-    expect(leg).toMatch(/\(c\.embedding <=> \$\d+::vector\) \+ \$\d+::float8 AS distance/);
+    const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
+    // The sort key is the output column holding the bare operator value, so the
+    // index's order-by operator still matches it.
+    expect(inner).toMatch(/c\.embedding <=> \$\d+::vector AS distance,/);
+    expect(inner).toMatch(/ORDER BY distance LIMIT \$\d+$/);
+    // The margin is added outside the ranked query, to the reported distance.
+    expect(leg).toMatch(/SELECT cs\.workspace_id, cs\.conversation_id, hit\.distance \+ \$\d+::float8 AS distance/);
+  });
+
+  it('computes the chunk distance once per row (generic-rag-chunking D-052)', () => {
+    // Ordering by `emb <=> q` while selecting `(emb <=> q) + margin` evaluates the
+    // operator twice per row, and each evaluation detoasts the stored vector: on
+    // consult's exact-sorted chunk scan that doubled the leg's buffer reads.
+    const leg = chunkLegOf(build({ chunkScan: 'ann' }).text);
+    const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
+    expect(inner.match(/<=>/g) ?? []).toHaveLength(1);
   });
 
   it('leaves the parent leg exact over the materialised slice', () => {
