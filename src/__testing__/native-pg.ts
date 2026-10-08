@@ -29,7 +29,7 @@ import postgres from 'postgres';
 
 declare module 'vitest' {
   export interface ProvidedContext {
-    /** Superuser URL of the suite's Postgres (pgvector installed, not yet created). */
+    /** Superuser URL of the suite's Postgres, with pgvector already created. */
     searchPgUrl: string;
   }
 }
@@ -101,9 +101,23 @@ async function stopChild(child: ChildProcess, timeoutMs: number): Promise<void> 
   }
 }
 
+async function initializeVector(url: string): Promise<void> {
+  const sql = postgres(url, { max: 1, onnotice: () => {} });
+  try {
+    await sql.begin(async (tx) => {
+      // IF NOT EXISTS alone does not serialize concurrent extension creation.
+      await tx`SELECT pg_advisory_xact_lock(hashtext('@papercusp/search:vector-init'))`;
+      await tx`CREATE EXTENSION IF NOT EXISTS vector`;
+    });
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
+}
+
 export default async function setup({ provide }: { provide: (key: 'searchPgUrl', value: string) => void }) {
   const given = process.env.SEARCH_TEST_PG_URL;
   if (given) {
+    await initializeVector(given);
     provide('searchPgUrl', given);
     return undefined;
   }
@@ -136,6 +150,7 @@ export default async function setup({ provide }: { provide: (key: 'searchPgUrl',
     if (notReady !== null) {
       throw new Error(`test Postgres never answered SELECT 1 (${notReady}); server log tail:\n${log.join('')}`);
     }
+    await initializeVector(url);
     provide('searchPgUrl', url);
     const proc = child;
     return async () => {
