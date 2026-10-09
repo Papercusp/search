@@ -167,6 +167,25 @@ async function run(store: FakeStore, surface: ChunkSurface, extra: Record<string
 }
 
 describe('planChunks', () => {
+  it('complete-body windows retain tail content beyond a prefix cap', () => {
+    const text = 'ordinary context '.repeat(8000) + 'TAIL-FINDING';
+    const surface = { splitter: { kind: 'window' as const, size: 1500, overlap: 250 }, maxChunks: 32 };
+    expect(planChunks(surface, text, 'Title', sha).truncated).toBe(true);
+    const complete = planChunks({ ...surface, completeBody: true }, text, 'Title', sha);
+    expect(complete.truncated).toBe(false);
+    expect(complete.chunks.length).toBeGreaterThan(32);
+    expect(complete.chunks.at(-1)?.content).toContain('TAIL-FINDING');
+    expect(splitterVersionOf({ ...surface, completeBody: true })).not.toBe(splitterVersionOf(surface));
+  });
+
+  it('complete-body markdown retains late headings and continuation rows', () => {
+    const text = Array.from({ length: 300 }, (_, i) => section(`Heading ${i}`, `content ${i} `.repeat(15))).join('');
+    const result = planChunks({ splitter: { kind: 'markdown', maxChars: 80 }, maxChunks: 4, completeBody: true }, text, 'Doc', sha);
+    expect(result.truncated).toBe(false);
+    expect(result.chunks.at(-1)?.header).toContain('Heading 299');
+    expect(result.chunks.at(-1)?.content).toContain('content 299');
+  });
+
   it('cuts windows, embeds the header, and hashes header + content', () => {
     const text = 'x'.repeat(130);
     const plan = planChunks({ splitter: { kind: 'window', size: 60, overlap: 10 }, maxChunks: 8 }, text, 'Title', sha);

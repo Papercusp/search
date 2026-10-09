@@ -74,6 +74,9 @@ export interface ChunkSurface {
   splitter: ChunkSplitter;
   /** Cap on chunks per parent. Text past the last chunk is dropped, logged and counted. */
   maxChunks: number;
+  /** Index the complete retained body; input length determines the chunk count.
+   * Other surfaces retain the deliberately bounded maxChunks prefix. */
+  completeBody?: boolean;
   /**
    * Query-time only: subtracted from every chunk similarity before best-match
    * pooling with the parent vector (P-001 measured it per collection). The

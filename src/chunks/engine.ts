@@ -55,10 +55,11 @@ function positiveInt(n: unknown): boolean {
  * text could be cut differently, so editing a surface's splitter or cap in the
  * registry re-cuts its parents instead of trusting chunks cut the old way.
  */
-export function splitterVersionOf(surface: Pick<ChunkSurface, 'splitter' | 'maxChunks'>): string {
+export function splitterVersionOf(surface: Pick<ChunkSurface, 'splitter' | 'maxChunks' | 'completeBody'>): string {
   const s = surface.splitter;
-  if (s.kind === 'window') return `window-v1:${s.size}/${s.overlap}@${surface.maxChunks}`;
-  return `markdown-v1:${s.maxChars}/${s.minChars ?? 20}/${s.headingDepth ?? 3}@${surface.maxChunks}`;
+  const extent = surface.completeBody ? 'complete' : surface.maxChunks;
+  if (s.kind === 'window') return `window-v1:${s.size}/${s.overlap}@${extent}`;
+  return `markdown-v1:${s.maxChars}/${s.minChars ?? 20}/${s.headingDepth ?? 3}@${extent}`;
 }
 
 /**
@@ -93,6 +94,9 @@ export function resolveChunkSurface(surface: ChunkSurface): ResolvedChunkSurface
     if (value.includes(';')) throw new Error(`${where}: ${field} must be a single expression (no ';')`);
   }
   if (!positiveInt(surface.maxChunks)) throw new Error(`${where}: maxChunks must be a positive integer`);
+  if (surface.completeBody !== undefined && typeof surface.completeBody !== 'boolean') {
+    throw new Error(`${where}: completeBody must be boolean`);
+  }
   const s = surface.splitter;
   if (s.kind === 'window') {
     if (!positiveInt(s.size)) throw new Error(`${where}: window size must be a positive integer`);
@@ -140,13 +144,19 @@ export interface ChunkPlan {
 
 /** Split one parent into chunks. Pure. */
 export function planChunks(
-  surface: Pick<ChunkSurface, 'splitter' | 'maxChunks'>,
+  surface: Pick<ChunkSurface, 'splitter' | 'maxChunks' | 'completeBody'>,
   text: string,
   header: string | null,
   hash: ChunkHash,
 ): ChunkPlan {
   const s = surface.splitter;
-  const cap = surface.maxChunks;
+  // Every emitted part consumes input. Complete-body work is bounded by the
+  // actual retained text, rather than another guessed corpus-size ceiling.
+  const cap = surface.completeBody
+    ? s.kind === 'window'
+      ? Math.ceil(text.length / Math.max(1, s.size - s.overlap)) + 1
+      : text.length + 1
+    : surface.maxChunks;
   const headerLine = header && header.trim() !== '' ? header : null;
   let pieces: { anchor: string | null; header: string | null; content: string }[];
   let produced: number;
@@ -160,6 +170,7 @@ export function planChunks(
       maxChars: s.maxChars,
       ...(s.minChars !== undefined ? { minChars: s.minChars } : {}),
       ...(s.headingDepth !== undefined ? { headingDepth: s.headingDepth } : {}),
+      ...(surface.completeBody ? { maxSections: cap, maxRows: cap } : {}),
     });
     produced = sections.length;
     pieces = sections.slice(0, cap).map((sec) => {
