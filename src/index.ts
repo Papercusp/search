@@ -70,16 +70,23 @@ export {
 } from './leg-health';
 export {
   observeEmbedLatency,
+  beginEmbedLatencyTrace,
+  beginEmbedLatencyStage,
+  finishEmbedLatencyStage,
+  finishEmbedLatencyTrace,
   readEmbedLatency,
   embedLatencyObservedCount,
   resetEmbedLatency,
   summariseEmbedSamples,
   EMBED_LATENCY_CAPACITY,
+  EMBED_LATENCY_RECENT_SAMPLE_LIMIT,
   UNATTRIBUTED_CALLER,
   type EmbedLatencyWindow,
   type EmbedCallerLatency,
   type EmbedLatencySample,
   type EmbedLatencyOutcome,
+  type EmbedLatencyStage,
+  type EmbedLatencyStageDurations,
 } from './embed-latency';
 export {
   configureSearchDefaults,

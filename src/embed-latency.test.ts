@@ -16,6 +16,7 @@ import type { RankedItem } from '@papercusp/rrf';
 import { runHybridSearch } from './hybrid';
 import {
   EMBED_LATENCY_CAPACITY,
+  beginEmbedLatencyStage,
   UNATTRIBUTED_CALLER,
   embedLatencyObservedCount,
   observeEmbedLatency,
@@ -170,7 +171,10 @@ describe('engine wiring — runHybridSearch records what the sampler needs', () 
 
   it('a budget-blown embed degrades to BM25-only AND records a timeout sample with the budget attached', async () => {
     const src = fakeSource('A', [hit('A', '1', 1)]);
-    const never: Embedder = () => new Promise<number[]>(() => {});
+    const never: Embedder = (_query, signal) => {
+      beginEmbedLatencyStage(signal, 'provider');
+      return new Promise<number[]>(() => {});
+    };
     const res = await runHybridSearch([src], {
       sql,
       query: 'q',
@@ -184,12 +188,18 @@ describe('engine wiring — runHybridSearch records what the sampler needs', () 
     });
     expect(res.embedderAvailable).toBe(false); // degraded, not hung
     expect(res.results.length).toBeGreaterThan(0); // BM25 still answered
-    const w = readEmbedLatency({ windowMs: 60_000 });
+    const w = readEmbedLatency({ windowMs: 60_000, includeRecentSamples: true });
     expect(w.callers[0]).toMatchObject({
       caller: 'midturn:related-context',
       timeout: 1,
       budgetMs: 20, // THE point: the sample knows which budget was blown
     });
+    expect(w.recentSamples?.[0]).toMatchObject({
+      caller: 'midturn:related-context',
+      outcome: 'timeout',
+      stageDurationsMs: { provider: expect.any(Number) },
+    });
+    expect(w.recentSamples?.[0]?.stageDurationsMs?.provider).toBeGreaterThan(0);
   });
 
   it('a throwing embedder records error, not timeout', async () => {

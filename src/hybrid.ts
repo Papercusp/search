@@ -33,6 +33,8 @@ import {
 } from "./legs";
 import { observeLegs } from "./leg-health";
 import {
+  beginEmbedLatencyTrace,
+  finishEmbedLatencyTrace,
   observeEmbedLatency,
   UNATTRIBUTED_CALLER,
   type EmbedLatencyOutcome,
@@ -449,6 +451,7 @@ async function embedWithBudget(
   if (signal?.aborted) throw signal.reason ?? new Error("aborted");
 
   const embedAbort = new AbortController();
+  beginEmbedLatencyTrace(embedAbort.signal);
   const p = embedder(query, embedAbort.signal);
   return await new Promise<number[]>((resolve, reject) => {
     let settled = false;
@@ -460,12 +463,14 @@ async function embedWithBudget(
     // embed latency, and letting cancellations into the window would poison
     // p99 with noise that has no remedy.
     const record = (outcome: EmbedLatencyOutcome): void => {
+      const stageDurationsMs = finishEmbedLatencyTrace(embedAbort.signal, Date.now());
       observeEmbedLatency({
         atMs: Date.now(),
         caller,
         budgetMs: bounded ? budgetMs! : null,
         durationMs: Date.now() - startedAtMs,
         outcome,
+        ...(stageDurationsMs ? { stageDurationsMs } : {}),
       });
     };
     const finish = (fn: () => void): void => {
@@ -478,7 +483,10 @@ async function embedWithBudget(
     function onAbort(): void {
       const reason = signal!.reason ?? new Error("aborted");
       embedAbort.abort(reason);
-      finish(() => reject(reason));
+      finish(() => {
+        finishEmbedLatencyTrace(embedAbort.signal);
+        reject(reason);
+      });
     }
     if (signal) {
       if (signal.aborted) {

@@ -32,6 +32,8 @@ import { pinModuleState } from '@papercusp/module-singleton';
  *  an hour of busy fleet traffic per process; the truncation flag keeps the
  *  read honest when traffic outruns it. */
 export const EMBED_LATENCY_CAPACITY = 512;
+/** Per-call details exposed by dev:embed_latency stay small even on a busy worker. */
+export const EMBED_LATENCY_RECENT_SAMPLE_LIMIT = 50;
 
 /** How an observed embed ended. `timeout` means the CALLER's budget expired
  *  (EmbedTimeoutError) — the instrument was graded against its budget and lost;
@@ -40,6 +42,10 @@ export const EMBED_LATENCY_CAPACITY = 512;
  *  about embed latency, and letting cancellations into the window would poison
  *  p99 with noise that has no remedy. */
 export type EmbedLatencyOutcome = 'ok' | 'timeout' | 'error';
+
+/** Fixed, low-cardinality stages that explain where one query embed spent time. */
+export type EmbedLatencyStage = 'admission' | 'provider' | 'localInference';
+export type EmbedLatencyStageDurations = Partial<Record<EmbedLatencyStage, number>>;
 
 /** One recorded embed. Written on every query embed — deliberately tiny. */
 export interface EmbedLatencySample {
@@ -53,6 +59,8 @@ export interface EmbedLatencySample {
   budgetMs: number | null;
   durationMs: number;
   outcome: EmbedLatencyOutcome;
+  /** Per-stage wall time; raw query text is never retained. */
+  stageDurationsMs?: EmbedLatencyStageDurations;
 }
 
 /** Per-caller trailing-window aggregate. Percentiles are NEAREST-RANK over the
@@ -81,6 +89,13 @@ export interface EmbedLatencyWindow {
   oldestSampleMs: number | null;
   newestSampleMs: number | null;
   truncatedByCapacity: boolean;
+  /** Present only for an explicitly requested, bounded recent-sample read. */
+  recentSamples?: EmbedLatencySample[];
+}
+
+interface EmbedLatencyTrace {
+  stageDurationsMs: EmbedLatencyStageDurations;
+  activeSinceMs: Partial<Record<EmbedLatencyStage, number>>;
 }
 
 interface EmbedLatencyState {
@@ -94,6 +109,67 @@ const state = pinModuleState<EmbedLatencyState>('@papercusp/search.embed-latency
   next: 0,
   count: 0,
 }));
+
+const activeTraces = new WeakMap<AbortSignal, EmbedLatencyTrace>();
+const STAGES: readonly EmbedLatencyStage[] = ['admission', 'provider', 'localInference'];
+
+/** Begin a per-embed trace on the cancellation signal already passed to embedders. */
+export function beginEmbedLatencyTrace(signal: AbortSignal): void {
+  try {
+    activeTraces.set(signal, { stageDurationsMs: {}, activeSinceMs: {} });
+  } catch {
+    // Trace setup is diagnostic only and must never fail an embed.
+  }
+}
+
+/** Start timing one fixed stage. Missing/closed traces are intentionally ignored. */
+export function beginEmbedLatencyStage(signal: AbortSignal | undefined, stage: EmbedLatencyStage): void {
+  try {
+    const trace = signal ? activeTraces.get(signal) : undefined;
+    if (trace) trace.activeSinceMs[stage] = Date.now();
+  } catch {
+    // Instrumentation must not affect search behavior.
+  }
+}
+
+/** Finish timing one stage, accumulating repeated visits to the same stage. */
+export function finishEmbedLatencyStage(signal: AbortSignal | undefined, stage: EmbedLatencyStage): void {
+  try {
+    const trace = signal ? activeTraces.get(signal) : undefined;
+    const startedAtMs = trace?.activeSinceMs[stage];
+    if (!trace || startedAtMs === undefined) return;
+    trace.stageDurationsMs[stage] =
+      (trace.stageDurationsMs[stage] ?? 0) + Math.max(0, Date.now() - startedAtMs);
+    delete trace.activeSinceMs[stage];
+  } catch {
+    // Instrumentation must not affect search behavior.
+  }
+}
+
+/**
+ * Close a trace. An in-flight stage is charged through `nowMs`, which lets a
+ * timeout sample identify the stage that was still active when its budget fired.
+ */
+export function finishEmbedLatencyTrace(
+  signal: AbortSignal,
+  nowMs: number = Date.now(),
+): EmbedLatencyStageDurations | undefined {
+  try {
+    const trace = activeTraces.get(signal);
+    if (!trace) return undefined;
+    for (const stage of STAGES) {
+      const startedAtMs = trace.activeSinceMs[stage];
+      if (startedAtMs !== undefined) {
+        trace.stageDurationsMs[stage] =
+          (trace.stageDurationsMs[stage] ?? 0) + Math.max(0, nowMs - startedAtMs);
+      }
+    }
+    activeTraces.delete(signal);
+    return Object.keys(trace.stageDurationsMs).length > 0 ? { ...trace.stageDurationsMs } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Nearest-rank percentile over an ASCENDING numeric slice. rank = ceil(p/100·N)
@@ -120,6 +196,7 @@ export function summariseEmbedSamples(
   windowMs: number,
   nowMs: number,
   capacityReached: boolean,
+  recentSampleLimit = 0,
 ): EmbedLatencyWindow {
   const since = nowMs - windowMs;
   const inWindow = samples.filter((s) => s.atMs >= since);
@@ -161,6 +238,20 @@ export function summariseEmbedSamples(
   const truncatedByCapacity =
     capacityReached && inWindow.length === samples.length && oldest !== null && since < oldest;
 
+  const recentSamples = recentSampleLimit > 0
+    ? [...inWindow]
+        .sort((a, b) => a.atMs - b.atMs)
+        .slice(-recentSampleLimit)
+        .map((sample) => ({
+          atMs: sample.atMs,
+          caller: sample.caller,
+          budgetMs: sample.budgetMs,
+          durationMs: sample.durationMs,
+          outcome: sample.outcome,
+          ...(sample.stageDurationsMs ? { stageDurationsMs: { ...sample.stageDurationsMs } } : {}),
+        }))
+    : undefined;
+
   return {
     windowMs,
     embeds: inWindow.length,
@@ -168,6 +259,7 @@ export function summariseEmbedSamples(
     oldestSampleMs: oldest,
     newestSampleMs: inWindow.length > 0 ? Math.max(...inWindow.map((s) => s.atMs)) : null,
     truncatedByCapacity,
+    ...(recentSamples ? { recentSamples } : {}),
   };
 }
 
@@ -187,14 +279,24 @@ export function observeEmbedLatency(sample: EmbedLatencySample): void {
 
 /** Read the trailing-window aggregate. Default window: 1 hour (matches the
  *  retrieval-degradation sweep's window so the two verdicts overlay). */
-export function readEmbedLatency(opts: { windowMs?: number; nowMs?: number } = {}): EmbedLatencyWindow {
+export function readEmbedLatency(opts: {
+  windowMs?: number;
+  nowMs?: number;
+  includeRecentSamples?: boolean;
+} = {}): EmbedLatencyWindow {
   const windowMs = opts.windowMs ?? 60 * 60_000;
   const nowMs = opts.nowMs ?? Date.now();
   const samples: EmbedLatencySample[] = [];
   for (const s of state.ring) {
     if (s != null) samples.push(s);
   }
-  return summariseEmbedSamples(samples, windowMs, nowMs, state.count >= EMBED_LATENCY_CAPACITY);
+  return summariseEmbedSamples(
+    samples,
+    windowMs,
+    nowMs,
+    state.count >= EMBED_LATENCY_CAPACITY,
+    opts.includeRecentSamples ? EMBED_LATENCY_RECENT_SAMPLE_LIMIT : 0,
+  );
 }
 
 /** Total embeds ever observed by this process (monotonic). */
