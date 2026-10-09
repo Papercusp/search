@@ -29,6 +29,7 @@ import {
   finaliseLeg,
   summariseLegs,
   type SearchLegs,
+  type LegAccumulator,
 } from "./legs";
 import { observeLegs } from "./leg-health";
 import {
@@ -70,6 +71,8 @@ export interface SearchContext {
    *  ignore it and keep warming in the background. A route-abort via `signal`
    *  still REJECTS and outranks this timeout. */
   embedTimeoutMs?: number;
+  /** Bound each source call independently; a stalled source cannot erase healthy siblings. */
+  sourceTimeoutMs?: number;
   /** A caller-owned query vector that has already been computed. When present,
    *  the semantic leg consumes it directly and does not invoke `embedder`.
    *  This is the native alternative to wrapping an embedder in a one-shot
@@ -202,6 +205,49 @@ export interface SearchResult {
   legs: SearchLegs;
 }
 
+class SourceTimeoutError extends Error {
+  constructor(readonly budgetMs: number) {
+    super(`source query exceeded ${budgetMs}ms budget`);
+    this.name = 'SourceTimeoutError';
+  }
+}
+
+/** Record execution where it happens, and cancel the source when its own budget expires. */
+async function sourceQuery<T>(
+  leg: LegAccumulator, source: SearchSource, ranker: string, ctx: SearchContext,
+  run: (signal: AbortSignal | undefined) => Promise<T>, rows: (value: T) => number,
+): Promise<T> {
+  const started = Date.now();
+  const bounded = Number.isFinite(ctx.sourceTimeoutMs) && ctx.sourceTimeoutMs! > 0;
+  const abort = bounded ? new AbortController() : null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    ctx.signal?.throwIfAborted();
+    const value = bounded ? await new Promise<T>((resolve, reject) => {
+      onAbort = () => { abort!.abort(ctx.signal?.reason); reject(ctx.signal?.reason ?? new Error('aborted')); };
+      ctx.signal?.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(() => {
+        const error = new SourceTimeoutError(ctx.sourceTimeoutMs!);
+        abort!.abort(error);
+        reject(error);
+      }, ctx.sourceTimeoutMs);
+      Promise.resolve().then(() => run(abort!.signal)).then(resolve, reject);
+    }) : await run(ctx.signal);
+    leg.sourceCalls.push({ source: source.name, ranker, status: 'ran', rows: rows(value),
+      durationMs: Date.now() - started, reason: null });
+    return value;
+  } catch (error) {
+    leg.sourceCalls.push({ source: source.name, ranker,
+      status: error instanceof SourceTimeoutError ? 'timed-out' : 'errored', rows: null,
+      durationMs: Date.now() - started, reason: String((error as Error)?.message ?? error) });
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) ctx.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 /**
  * Run ONE source's lexical leg, widening to a second stage when the first
  * under-fills. See {@link SearchContext.lexicalCascade} for why this defaults
@@ -264,6 +310,8 @@ export async function runFullTextSearch(
   const hits: SearchHit[] = [];
   for (const source of sources) {
     ctx.signal?.throwIfAborted();
+    semanticLeg.sourceCalls.push({ source: source.name, ranker: 'embeddings', status: 'not-run',
+      rows: null, durationMs: 0, reason: 'fulltext mode' });
     lexicalLeg.attempted = true;
     try {
       // The cascade matters MOST here. A HYBRID search whose AND query returns
@@ -272,7 +320,7 @@ export async function runFullTextSearch(
       // empty AND query returns an EMPTY PAGE. Measured on the live corpus, the
       // AND leg returns zero rows for 30% of 1-2 term, 50% of 3-14 term and 70%
       // of 15+ term REAL queries (D-056).
-      const { listing, stage2Added } = await lexicalWithCascade(
+      const { listing, stage2Added } = await sourceQuery(lexicalLeg, source, 'lexical', ctx, (signal) => lexicalWithCascade(
         source,
         {
           sql: ctx.sql,
@@ -281,7 +329,7 @@ export async function runFullTextSearch(
           scopeFilter: ctx.scopeFilter,
           limit: ctx.limit,
           filters: ctx.filters,
-          signal: ctx.signal,
+          signal,
           ...(ctx.lexicalMode && ctx.lexicalMode !== "and"
             ? { lexicalMode: ctx.lexicalMode }
             : {}),
@@ -293,7 +341,7 @@ export async function runFullTextSearch(
           enabled: ctx.lexicalCascade !== false,
           callerSetMode: ctx.lexicalMode !== undefined,
         },
-      );
+      ), result => result.listing.length);
       // Floor before collecting: fulltext has no fusion stage, but the floor
       // means the same thing here — reject what the ranker itself scored as
       // noise, in the ranker's own units.
@@ -529,6 +577,10 @@ export async function runHybridSearch(
   // `recordInput` for what actually reached fusion), so a new ranker leg
   // cannot be added later and quietly go unreported.
   const legs = { lexical: newLegAccumulator(), semantic: newLegAccumulator() };
+  if (ctx.mode !== 'hybrid') for (const source of sources) {
+    legs.lexical.sourceCalls.push({ source: source.name, ranker: 'lexical', status: 'not-run',
+      rows: null, durationMs: 0, reason: 'embeddings mode' });
+  }
 
   // Over-fetch per source so RRF has fusion headroom before the top-N cut.
   const candidateLimit = ctx.limit * 3;
@@ -666,21 +718,22 @@ export async function runHybridSearch(
         // second query per source for rows the main leg's own cascade already
         // reaches.
         if (since) {
-          const listing = await source.lexical({
+          const listing = await sourceQuery(leg, source, label, ctx, (signal) => source.lexical({
             ...params,
+            signal,
             filters: { ...params.filters, since },
-          });
+          }), result => result.length);
           leg.callsRun++;
           return listing;
         }
-        const { listing, stage2Added } = await lexicalWithCascade(
+        const { listing, stage2Added } = await sourceQuery(leg, source, label, ctx, (signal) => lexicalWithCascade(
           source,
-          params,
+          { ...params, signal },
           {
             enabled: ctx.lexicalCascade !== false,
             callerSetMode: ctx.lexicalMode !== undefined,
           },
-        );
+        ), result => result.listing.length);
         leg.callsRun++;
         leg.stage2Added += stage2Added;
         return listing;
@@ -836,14 +889,19 @@ export async function runHybridSearch(
         // A source with no embedding query has no semantic leg to attempt.
         // Leaving `attempted` false here is what makes "no registered source
         // implements one" report `not-run` instead of a phantom failure.
-        if (!source.embedding) return null;
+        if (!source.embedding) {
+          legs.semantic.sourceCalls.push({ source: source.name, ranker: 'embeddings', status: 'not-run',
+            rows: null, durationMs: 0, reason: 'source has no embedding query' });
+          return null;
+        }
         ctx.signal?.throwIfAborted();
         legs.semantic.attempted = true;
         try {
-          const listing = await source.embedding({
+          const listing = await sourceQuery(legs.semantic, source, 'embeddings', ctx, (signal) => source.embedding!({
             ...sourceParams(source),
+            signal,
             qVec,
-          });
+          }), result => result.length);
           legs.semantic.callsRun++;
           return listing;
         } catch (err) {
@@ -870,6 +928,13 @@ export async function runHybridSearch(
         floorList(list, "embeddings", sources[i]!.name),
       );
     }
+  }
+
+  if (!queryVec) for (const source of sources) {
+    legs.semantic.sourceCalls.push({ source: source.name, ranker: 'embeddings',
+      status: source.embedding && legs.semantic.blocked ? 'blocked' : 'not-run',
+      rows: null, durationMs: 0,
+      reason: source.embedding ? legs.semantic.blocked ?? 'query embedder unavailable' : 'source has no embedding query' });
   }
 
   const fusedRaw = rrfCombine(inputs, RRF_K_DEFAULT);

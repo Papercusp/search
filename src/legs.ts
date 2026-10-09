@@ -64,9 +64,22 @@ export interface LegFailure {
   error: string;
 }
 
+/** One source invocation, including successful empty and deliberately skipped calls. */
+export interface SourceCallReport {
+  source: string;
+  ranker: string;
+  status: 'ran' | 'errored' | 'timed-out' | 'blocked' | 'not-run';
+  /** Rows returned by the source, before floors/fusion; null means not measured. */
+  rows: number | null;
+  durationMs: number;
+  reason: string | null;
+}
+
 /** What one ranking leg actually did during a search. */
 export interface LegReport {
   status: LegStatus;
+  /** Optional for reports produced by older hosts. Engine calls always record it. */
+  sourceCalls?: SourceCallReport[];
   /**
    * Rows this leg contributed to fusion, AFTER any score floor and after the
    * fresh-leg dedupe — i.e. what the fusion stage genuinely saw from this leg,
@@ -140,6 +153,7 @@ export function emptyLegs(): SearchLegs {
 /** Mutable per-leg counters the engine feeds while a search runs. */
 export interface LegAccumulator {
   attempted: boolean;
+  sourceCalls: SourceCallReport[];
   candidates: number;
   floored: number;
   /** See {@link LegReport.stage2Added}. */
@@ -154,6 +168,7 @@ export interface LegAccumulator {
 export function newLegAccumulator(): LegAccumulator {
   return {
     attempted: false,
+    sourceCalls: [],
     candidates: 0,
     floored: 0,
     stage2Added: 0,
@@ -189,6 +204,7 @@ export function finaliseLeg(acc: LegAccumulator): LegReport {
   else status = 'ran';
   return {
     status,
+    ...(acc.sourceCalls.length ? { sourceCalls: acc.sourceCalls } : {}),
     candidates: acc.candidates,
     floored: acc.floored,
     stage2Added: acc.stage2Added,

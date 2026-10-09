@@ -80,6 +80,42 @@ const baseCtx: SearchContext = {
   limit: 5,
 };
 
+describe('per-source execution receipts and deadlines', () => {
+  it('retains a healthy hit when a sibling never settles and cancels that sibling', async () => {
+    let stalledSignal: AbortSignal | undefined;
+    const stalled: SearchSource = { name: 'plan', lexical: async (params) => {
+      stalledSignal = params.signal;
+      return await new Promise<Listing>(() => {});
+    } };
+    const out = await runHybridSearch([stalled, fakeSource('doc', { lexical: [hit('doc','repair',1)] }),
+      fakeSource('report')], { ...baseCtx, mode: 'hybrid', embedder: null,
+      lexicalCascade: false, sourceTimeoutMs: 25, recency: false, minScore: false });
+    expect(out.results.map(row => row.source_id)).toEqual(['repair']);
+    expect(stalledSignal?.aborted).toBe(true);
+    expect(out.legs.lexical.sourceCalls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'plan',status: 'timed-out',rows: null }),
+      expect.objectContaining({ source: 'doc',status: 'ran',rows: 1 }),
+      expect.objectContaining({ source: 'report',status: 'ran',rows: 0 }),
+    ]));
+    expect(out.legs.degraded).toBe(true);
+    expect(out.legs.semantic.sourceCalls).toHaveLength(3);
+  });
+
+  it('distinguishes a blocked semantic call from a successful empty call and an unsupported call', async () => {
+    const sources = [fakeSource('plan', { embedding: [] }), fakeSource('doc')];
+    const failed = await runHybridSearch(sources, { ...baseCtx,mode: 'hybrid',
+      embedder: async () => { throw new Error('embedding transport down'); } });
+    expect(failed.legs.semantic.sourceCalls).toEqual([
+      expect.objectContaining({ source: 'plan',status: 'blocked',rows: null,reason: expect.stringContaining('transport down') }),
+      expect.objectContaining({ source: 'doc',status: 'not-run',rows: null }),
+    ]);
+    const healthy = await runHybridSearch(sources, { ...baseCtx,mode: 'hybrid',embedder: async () => [1] });
+    expect(healthy.legs.semantic.sourceCalls?.find(call => call.source === 'plan')).toMatchObject({ source: 'plan',status: 'ran',rows: 0 });
+    const lexical = await runFullTextSearch(sources, baseCtx);
+    expect(lexical.legs.semantic.sourceCalls?.every(call => call.status === 'not-run')).toBe(true);
+  });
+});
+
 /**
  * The calls a source's lexical leg received, EXCLUDING the cascade's stage-2
  * re-query (WI-37582: `lexicalMode:'coverage-graded'`, fired whenever stage 1
