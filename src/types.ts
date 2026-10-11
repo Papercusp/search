@@ -27,7 +27,11 @@ export interface SearchHit {
   excerpt: string;
   /** ts_headline snippet with <mark> around matched terms. */
   highlight: string;
-  /** Ranker-native score (ts_rank_cd or cosine sim) or the fused RRF score. */
+  /**
+   * The fused score: RRF over the legs in hybrid mode, the position weight from
+   * merging the sources in fulltext mode (D-006). A source's own score sits in
+   * `rankerScores` and is comparable only within that source.
+   */
   score: number;
   /** Which rankers contributed this hit. */
   rankers: string[];

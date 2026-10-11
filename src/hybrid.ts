@@ -294,6 +294,27 @@ async function lexicalWithCascade(
 }
 
 /** BM25-only full-text search across the given sources (search:fulltext). */
+/**
+ * Merge per-source result lists by POSITION. Each list is in its source's own rank order;
+ * row `p` (0-based) of every list scores `1 / (k + p + 1)`, the weight RRF gives a lexical
+ * list in the hybrid path, and equal positions keep the lists' input (fan-out) order. Rows
+ * are never deduped across lists: two sources' keys name different things. The source's
+ * own relevance stays in `rankerScores`, comparable only within that source. Plan
+ * bm25-lexical-search-evoke-adoption-2026-10-10 D-006.
+ */
+export function mergeSourcesByPosition(lists: ReadonlyArray<ReadonlyArray<SearchHit>>): SearchHit[] {
+  const merged: SearchHit[] = [];
+  const depth = lists.reduce((max, list) => Math.max(max, list.length), 0);
+  for (let p = 0; p < depth; p++) {
+    const score = 1 / (RRF_K_DEFAULT + p + 1);
+    for (const list of lists) {
+      const hit = list[p];
+      if (hit) merged.push({ ...hit, score });
+    }
+  }
+  return merged;
+}
+
 export async function runFullTextSearch(
   sources: SearchSource[],
   ctx: SearchContext,
@@ -309,7 +330,7 @@ export async function runFullTextSearch(
   // source that failed here is just as invisible as it is in hybrid.
   const lexicalLeg = newLegAccumulator();
   const semanticLeg = newLegAccumulator();
-  const hits: SearchHit[] = [];
+  const perSource: SearchHit[][] = [];
   for (const source of sources) {
     ctx.signal?.throwIfAborted();
     semanticLeg.sourceCalls.push({ source: source.name, ranker: 'embeddings', status: 'not-run',
@@ -363,8 +384,7 @@ export async function runFullTextSearch(
       }
       // Carry the native score as provenance too, so a caller renders the same
       // shape whether it came through fulltext or hybrid.
-      for (const item of list)
-        hits.push({ ...item.row, rankerScores: { lexical: item.row.score } });
+      perSource.push(list.map((item) => ({ ...item.row, rankerScores: { lexical: item.row.score } })));
     } catch (err) {
       // Abort outranks graceful degradation: a cancelled search must reject,
       // not be "skipped" into a quiet partial result.
@@ -380,8 +400,11 @@ export async function runFullTextSearch(
       );
     }
   }
-  // Global re-rank by raw score across all sources, then top-N.
-  hits.sort((a, b) => b.score - a.score);
+  // Merge the sources by POSITION, never by raw score, then top-N. Each source ranks
+  // with its own engine and index: BM25 is unbounded, ts_rank_cd sits in [0,1), and
+  // two BM25 indexes carry different IDF statistics, so a raw-score sort hands every
+  // top slot to whichever source happens to use the larger scale.
+  const hits = mergeSourcesByPosition(perSource);
   return {
     results: hits.slice(0, ctx.limit),
     totalHits: hits.length,

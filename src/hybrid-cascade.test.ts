@@ -344,13 +344,13 @@ describe('lexical cascade — stage2Added is REPORTED, not just returned', () =>
 });
 
 describe('lexical cascade — page-level scope of the guarantee', () => {
-  it('append-only is per-SOURCE; a multi-source page is still cut globally by score', async () => {
-    // CHARACTERISATION, not an endorsement. `runFullTextSearch` concatenates
-    // every source's listing and re-ranks the whole pool by native score before
-    // the cut, so widening a HIGH-scoring source can push a LOW-scoring source's
-    // stage-1 row off the page. That global cut predates the cascade and is not
-    // changed by it, but it does bound what "strict superset" may be claimed
-    // over: the LISTING the cascade returns, never the multi-source PAGE.
+  it("widening one source cannot push another source's top row off a multi-source page", async () => {
+    // `runFullTextSearch` merges the sources by POSITION (plan
+    // bm25-lexical-search-evoke-adoption-2026-10-10 D-006): a row at position p
+    // competes only with other sources' rows at position p, so the cascade's
+    // widening of B adds rows BEHIND A's rows, never ahead of them. (The merge
+    // used to re-rank the pool by native score, and B's stage-2 rows then pushed
+    // A:1 off this five-row page.)
     const weak = cascadingSource('A', { and: [hit('A', '1', 1)], graded: [] });
     const strong = cascadingSource('B', {
       and: [hit('B', '1', 3)],
@@ -369,7 +369,7 @@ describe('lexical cascade — page-level scope of the guarantee', () => {
     );
 
     expect(refs(before.results)).toContain('A:1');
-    expect(refs(after.results)).not.toContain('A:1');
+    expect(refs(after.results)).toEqual(['A:1', 'B:1', 'B:g1', 'B:g2', 'B:g3']);
     expect(after.results).toHaveLength(5);
   });
 });

@@ -225,51 +225,70 @@ describe("runFullTextSearch", () => {
     );
   });
 
-  // ── GAP 13 — cross-source re-rank contract ───────────────────────────────
-  // `runFullTextSearch` (hybrid.ts:51) does ONE global sort by the raw,
-  // ranker-native score (`b.score - a.score`) across heterogeneous sources.
-  // These tests PIN that contract so a future change (e.g. a per-source score
-  // normalization, or switching to RRF fusion like the hybrid path) is a
-  // deliberate, test-visible decision rather than a silent regression.
+  // ── GAP 13 — cross-source merge contract ─────────────────────────────────
+  // Each source ranks with its own engine and index (BM25 is unbounded,
+  // ts_rank_cd sits in [0,1), two BM25 indexes carry different IDF statistics),
+  // so raw scores are NOT comparable across sources. `runFullTextSearch` merges
+  // the per-source lists by POSITION (plan bm25-lexical-search-evoke-adoption-
+  // 2026-10-10 D-006). It used to sort by raw score; that handed every top slot
+  // to whichever source used the larger scale.
 
-  it("GAP 13: cross-source ordering is by raw score, descending, regardless of source", async () => {
-    // Interleaved raw scores across two sources. The contract is that the raw
-    // ts_rank_cd-style number is treated as directly comparable across sources
-    // (NO per-source normalization) — so the merged order is purely score-desc.
+  it("GAP 13: a source with a larger score scale does not take every top slot", async () => {
+    // A scores like BM25, B like ts_rank_cd. A raw-score sort would give
+    // A:1, A:2, A:3, B:1, B:2.
     const a = fakeSource("A", {
-      lexical: [hit("A", "1", 0.9), hit("A", "2", 0.3)],
+      lexical: [hit("A", "1", 12), hit("A", "2", 9), hit("A", "3", 7)],
     });
     const b = fakeSource("B", {
-      lexical: [hit("B", "1", 0.5), hit("B", "2", 0.1)],
+      lexical: [hit("B", "1", 0.6), hit("B", "2", 0.2)],
     });
     const res = await runFullTextSearch([a, b], baseCtx);
     expect(res.results.map((h) => `${h.source}:${h.source_id}`)).toEqual([
-      "A:1", // 0.9
-      "B:1", // 0.5
-      "A:2", // 0.3
-      "B:2", // 0.1
+      "A:1",
+      "B:1",
+      "A:2",
+      "B:2",
+      "A:3",
     ]);
+    // The merged score is the position weight; the source's own score is kept.
+    expect(res.results[0]?.score).toBeCloseTo(1 / 61, 12);
+    expect(res.results[1]?.score).toBeCloseTo(1 / 61, 12);
+    expect(res.results[2]?.score).toBeCloseTo(1 / 62, 12);
+    expect(res.results[0]?.rankerScores).toEqual({ lexical: 12 });
+    expect(res.results[1]?.rankerScores).toEqual({ lexical: 0.6 });
   });
 
-  it("GAP 13: equal scores keep a STABLE order — earlier source first, then within-source order", async () => {
-    // Three hits all tied at 1.0 spanning two sources. A stable sort preserves
-    // insertion order: source A is fanned out before B, and within A the
-    // listing order is preserved. This pins determinism of the tie-break (no
-    // accidental reliance on an unstable sort).
+  it("GAP 13: rescaling one source's scores changes nothing", async () => {
+    const listB = [hit("B", "1", 0.6), hit("B", "2", 0.2)];
+    const order = async (scale: number) => {
+      const a = fakeSource("A", {
+        lexical: [hit("A", "1", 0.5 * scale), hit("A", "2", 0.1 * scale)],
+      });
+      const res = await runFullTextSearch([a, fakeSource("B", { lexical: listB })], baseCtx);
+      return res.results.map((h) => `${h.source}:${h.source_id}`);
+    };
+    const base = await order(1);
+    expect(base).toEqual(["A:1", "B:1", "A:2", "B:2"]);
+    expect(await order(1000)).toEqual(base);
+    expect(await order(0.001)).toEqual(base);
+  });
+
+  it("GAP 13: a source's own listing order is kept, and equal positions follow fan-out order", async () => {
+    // A's second row has the higher native score (a cascade stage-2 row is
+    // appended after the stage-1 rows): the source's order still wins.
     const a = fakeSource("A", {
-      lexical: [hit("A", "1", 1.0), hit("A", "2", 1.0)],
+      lexical: [hit("A", "1", 0.2), hit("A", "2", 0.9)],
     });
     const b = fakeSource("B", { lexical: [hit("B", "1", 1.0)] });
     const res = await runFullTextSearch([a, b], baseCtx);
     expect(res.results.map((h) => `${h.source}:${h.source_id}`)).toEqual([
       "A:1",
-      "A:2",
       "B:1",
+      "A:2",
     ]);
 
-    // And the tie-break is insensitive to the fan-out order ONLY in that it
-    // tracks it: swapping the source array swaps the tied order, proving the
-    // order is the (stable) fan-out order, not some hidden key.
+    // Swapping the source array swaps the tied positions: the tie-break is the
+    // fan-out order, not some hidden key.
     const res2 = await runFullTextSearch([b, a], baseCtx);
     expect(res2.results.map((h) => `${h.source}:${h.source_id}`)).toEqual([
       "B:1",
