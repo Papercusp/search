@@ -59,6 +59,7 @@ export {
 } from './legs';
 export {
   observeLegs,
+  setLegHealthObserver,
   readLegHealth,
   legHealthObservedCount,
   resetLegHealth,

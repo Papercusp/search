@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RankedItem } from '@papercusp/rrf';
 
 import { runFullTextSearch, runHybridSearch, type SearchContext } from './hybrid';
@@ -11,6 +11,7 @@ import {
   readLegHealth,
   resetLegHealth,
   sampleOfLegs,
+  setLegHealthObserver,
   summariseLegSamples,
   type LegSample,
 } from './leg-health';
@@ -164,6 +165,26 @@ describe('summariseLegSamples', () => {
 
 describe('observeLegs / readLegHealth', () => {
   beforeEach(() => resetLegHealth());
+  afterEach(() => setLegHealthObserver(null));
+
+  it('delivers the authoritative healthy and degraded samples once to the host sink', () => {
+    const sink = vi.fn();
+    setLegHealthObserver(sink);
+    observeLegs(semanticBlockedLegs(), NOW);
+    observeLegs(healthyLegs(), NOW + 1);
+    expect(sink.mock.calls.map(([sample]) => [sample.degraded, sample.atMs])).toEqual([[true, NOW], [false, NOW + 1]]);
+    expect(legHealthObservedCount()).toBe(2);
+    setLegHealthObserver(null);
+    observeLegs(healthyLegs(), NOW + 2);
+    expect(sink).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves the search result and ring when the external sink throws', () => {
+    setLegHealthObserver(() => { throw new Error('sink offline'); });
+    const legs = semanticBlockedLegs();
+    expect(observeLegs(legs, NOW)).toBe(legs);
+    expect(readLegHealth({ nowMs: NOW }).degraded).toBe(1);
+  });
 
   it('returns its argument unchanged so it can wrap a call in place', () => {
     const legs = healthyLegs();

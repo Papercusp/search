@@ -62,13 +62,20 @@ interface LegHealthState {
   ring: LegSample[];
   next: number;
   count: number;
+  observer: ((sample: LegSample) => void) | null;
 }
 
 const state = pinModuleState<LegHealthState>('@papercusp/search.leg-health', () => ({
   ring: new Array<LegSample>(LEG_HEALTH_CAPACITY),
   next: 0,
   count: 0,
+  observer: null,
 }));
+
+/** Optional host sink for the SAME per-search verdict; this library stays domain-free. */
+export function setLegHealthObserver(observer: ((sample: LegSample) => void) | null): void {
+  state.observer = observer;
+}
 
 /**
  * The aggregate over a trailing window.
@@ -158,9 +165,11 @@ export function sampleOfLegs(legs: SearchLegs, atMs: number): LegSample {
  */
 export function observeLegs(legs: SearchLegs, nowMs: number = Date.now()): SearchLegs {
   try {
-    state.ring[state.next] = sampleOfLegs(legs, nowMs);
+    const sample = sampleOfLegs(legs, nowMs);
+    state.ring[state.next] = sample;
     state.next = (state.next + 1) % LEG_HEALTH_CAPACITY;
     state.count += 1;
+    state.observer?.(sample);
   } catch {
     // Deliberately silent: a health counter is never worth a failed search.
   }
