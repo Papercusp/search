@@ -137,11 +137,11 @@ export function summariseLegSamples(
   };
 }
 
-/** PURE: reduce a finished `SearchLegs` verdict to the sample we retain. */
-export function sampleOfLegs(legs: SearchLegs, atMs: number): LegSample {
+/** Reduce the authoritative verdict; an optional host sink observes the same sample. */
+export function sampleOfLegs(legs: SearchLegs, atMs: number, observeFallback?: (sample: LegSample) => void): LegSample {
   const lexicalRan = legs.lexical.status === 'ran';
   const semanticRan = legs.semantic.status === 'ran';
-  return {
+  const sample = {
     atMs,
     degraded: legs.degraded,
     semanticBlocked: legs.semantic.blocked !== null,
@@ -151,6 +151,8 @@ export function sampleOfLegs(legs: SearchLegs, atMs: number): LegSample {
     semanticEmpty: semanticRan && legs.semantic.candidates === 0 && lexicalRan && legs.lexical.candidates > 0,
     lexicalEmpty: lexicalRan && legs.lexical.candidates === 0 && semanticRan && legs.semantic.candidates > 0,
   };
+  try { observeFallback?.(sample); } catch { /* instrumentation must not fail a search */ }
+  return sample;
 }
 
 /**
@@ -165,11 +167,10 @@ export function sampleOfLegs(legs: SearchLegs, atMs: number): LegSample {
  */
 export function observeLegs(legs: SearchLegs, nowMs: number = Date.now()): SearchLegs {
   try {
-    const sample = sampleOfLegs(legs, nowMs);
+    const sample = sampleOfLegs(legs, nowMs, state.observer ?? undefined);
     state.ring[state.next] = sample;
     state.next = (state.next + 1) % LEG_HEALTH_CAPACITY;
     state.count += 1;
-    state.observer?.(sample);
   } catch {
     // Deliberately silent: a health counter is never worth a failed search.
   }
