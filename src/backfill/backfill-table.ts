@@ -69,6 +69,8 @@ export interface BackfillTableOptions<P extends BackfillProfile = BackfillProfil
   logLabel?: string;
   /** How errors name the storage (default `the vector storage`). */
   storageLabel?: string;
+  /** Optional host sink: batch-eligible rows served by batching rather than per-row retry. */
+  observeFallback?: (decision: { eligible: number; applied: number; reason: string; scope: string }) => unknown;
 }
 
 /**
@@ -196,6 +198,14 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
     let batchVectors: Array<number[] | null> | null = null;
     if (embedMany && batch.length > 1) {
       const acc: Array<number[] | null> = new Array<number[] | null>(texts.length).fill(null);
+      const { observeFallback } = options;
+      let eligible = 0;
+      for (let off = 0; off < texts.length; off += batchChunkSize) {
+        const count = Math.min(batchChunkSize, texts.length - off);
+        if (count < 2) break;
+        eligible += count;
+      }
+      let reason = 'batch-applied';
       let anyChunkOk = false;
       for (let off = 0; off < texts.length; off += batchChunkSize) {
         const slice = texts.slice(off, off + batchChunkSize);
@@ -204,6 +214,7 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
         try {
           const vecs = await withDeadline(embedMany(slice), batchTimeoutMs(slice.length), 'embed_batch');
           if (vecs.length !== slice.length) {
+            reason = 'batch-cardinality-mismatch';
             // A contract breach, not a transient failure: say so.
             logger.warn(
               `[${logLabel}] batch embed returned ${vecs.length} vectors for ` +
@@ -214,6 +225,7 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
           for (let j = 0; j < vecs.length; j++) acc[off + j] = vecs[j]!;
           anyChunkOk = true;
         } catch (err) {
+          reason = 'batch-failed';
           // Never silent: an always-failing batch path looks exactly like a working
           // one from outside, only slower.
           if (!warnedBatchFallback) {
@@ -227,6 +239,12 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
           // same timeout. The rest of this batch takes the per-row path.
           break;
         }
+      }
+      const applied = acc.filter((vector) => vector !== null).length;
+      if (reason === 'batch-applied' && applied < eligible) reason = 'batch-partial';
+      if (eligible > 0) {
+        try { observeFallback?.({ eligible, applied, reason, scope: target.table }); }
+        catch { /* A host observer must not fail the backfill. */ }
       }
       batchVectors = anyChunkOk ? acc : null;
     }

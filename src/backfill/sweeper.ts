@@ -80,6 +80,7 @@ export interface BackfillSweeperConfig<P extends BackfillProfile = BackfillProfi
     | 'resolveProfileSelection'
     | 'logLabel'
     | 'storageLabel'
+    | 'observeFallback'
   > {
   /** The targets, in canonical order. Read at the start of every sweep. */
   getTargets: () => readonly BackfillTarget[];
@@ -262,6 +263,7 @@ export function createBackfillSweeper<P extends BackfillProfile = BackfillProfil
               logger,
               logLabel: label,
               storageLabel: config.storageLabel,
+              observeFallback: config.observeFallback,
             });
             consumed.set(target.table, used + s.scanned);
             const acc = byTable.get(target.table)!;

@@ -159,6 +159,28 @@ describe('predicates', () => {
 });
 
 describe('backfillTable', () => {
+  it('counts failed batch decisions beyond the warning cooldown and measures actual batch recovery', async () => {
+    const observations: Array<{ eligible: number; applied: number; reason: string; scope: string }> = [];
+    const observeFallback = (decision: typeof observations[number]) => observations.push(decision);
+    const log = { ...quiet(), warn: vi.fn() };
+    const broken = fakeDb({ 's.t': { rows: rows('a', 'b', 'c', 'd') } });
+    const failed = await backfillTable(broken.sql, target('s.t'), { ...base, batchSize: 2,
+      embed: vec3, embedMany: async () => { throw new Error('batch unavailable'); }, logger: log, observeFallback });
+    expect(failed.embedded).toBe(4);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(observations).toEqual([
+      { eligible: 2, applied: 0, reason: 'batch-failed', scope: 's.t' },
+      { eligible: 2, applied: 0, reason: 'batch-failed', scope: 's.t' },
+    ]);
+    const healthy = fakeDb({ 's.t': { rows: rows('a', 'b', 'c') } });
+    await backfillTable(healthy.sql, target('s.t'), { ...base, embed: vec3,
+      embedMany: async (texts) => texts.map(() => [1, 2, 3]), batchChunkSize: 2, observeFallback });
+    expect(observations.at(-1)).toEqual({ eligible: 2, applied: 2, reason: 'batch-applied', scope: 's.t' });
+    const fault = fakeDb({ 's.t': { rows: rows('a', 'b') } });
+    expect((await backfillTable(fault.sql, target('s.t'), { ...base, embed: vec3,
+      embedMany: async (texts) => texts.map(() => [1, 2, 3]), observeFallback: () => { throw new Error('sink failed'); } })).embedded).toBe(2);
+  });
+
   const profile = { profileId: 'p1' };
   const resolveProfileSelection = () => ({ profileId: 'p1', legacyMode: 'm1' });
   const combos = [false, true].flatMap((space) =>
