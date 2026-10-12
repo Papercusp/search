@@ -300,16 +300,22 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
               : `${alias}.${k.column}::text = ${CHUNK_ALIAS}.parent_key[${i + 1}]`))
             .join(' AND ')
       : keys.map((k) => `${alias}.${k.column} = ${CHUNK_ALIAS}.${k.column}`).join(' AND ');
-    const surfaceMatch = chunks.keying === 'shared' ? sql`${sql.unsafe(CHUNK_ALIAS)}.surface = ${surfaceName} AND` : sql``;
+    // An ANN leg may use a per-surface partial HNSW index. Its predicate must
+    // remain visible under a generic plan, including with an ANN parent leg:
+    // a bound surface makes the planner walk the whole-table graph instead.
+    const literalSurface = chunks.keying === 'shared' && chunkScan === 'ann';
+    if (literalSurface && !SURFACE_LITERAL.test(surfaceName)) {
+      throw new Error(`chunk vector leg: surface '${surfaceName}' cannot be inlined as a SQL literal`);
+    }
+    const surfaceMatch = chunks.keying !== 'shared' ? sql`` : literalSurface
+      ? sql.unsafe(`${CHUNK_ALIAS}.surface = '${surfaceName}' AND`)
+      : sql`${sql.unsafe(CHUNK_ALIAS)}.surface = ${surfaceName} AND`;
     if (chunkAnnOverSlice) {
       if (chunks.keying !== 'shared') {
         throw new Error(
           `chunk vector leg: chunkScan 'ann' with scan 'exact' needs a shared-keying chunk table; ` +
             `surface '${surfaceName}' reads '${table}' (keying '${chunks.keying}')`,
         );
-      }
-      if (!SURFACE_LITERAL.test(surfaceName)) {
-        throw new Error(`chunk vector leg: surface '${surfaceName}' cannot be inlined as a SQL literal`);
       }
       // D-046, D-048. The inner query reads the chunk table ALONE and orders by
       // the vector operator, so an HNSW index can serve it:
@@ -342,8 +348,7 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
                     ${sql.unsafe(emb)} <=> ${q}::vector AS distance,
                     ${sql.unsafe(anchor)} AS matched_anchor
                FROM ${sql.unsafe(table)} ${sql.unsafe(CHUNK_ALIAS)}
-              WHERE ${sql.unsafe(`${CHUNK_ALIAS}.surface = '${surfaceName}'`)}
-                AND ${sql.unsafe(emb)} IS NOT NULL
+              WHERE ${surfaceMatch} ${sql.unsafe(emb)} IS NOT NULL
                 AND (${space({ profileColumn: profile, modeColumn: modeCol })})
                 AND (${chunkFilter})
            ORDER BY distance

@@ -244,6 +244,17 @@ describe("chunkAwareVectorLegSql chunkScan:'ann' over an exact slice (D-046)", (
     expect(plan).toMatch(/Index Scan using text_chunks_items_embedding_hnsw_idx on text_chunks/);
   });
 
+  it('uses the partial chunk index with an ANN parent leg under a generic plan', async () => {
+    const plan = await sql.begin(async (tx) => {
+      await tx.unsafe('SET LOCAL plan_cache_mode = force_generic_plan');
+      await tx.unsafe('SET LOCAL enable_seqscan = off');
+      await tx.unsafe('SET LOCAL enable_sort = off');
+      const rows = await tx`EXPLAIN ${legSql(tx as never, 'ann', 5, () => ({ scan: 'ann' })) as never}`;
+      return rows.map((r) => String((r as Record<string, unknown>)['QUERY PLAN'])).join('\n');
+    });
+    expect(plan).toMatch(/Index Scan using text_chunks_items_embedding_hnsw_idx on text_chunks/);
+  });
+
   it('control: the exact chunk leg is not served by it under the same settings', async () => {
     const plan = await sql.begin(async (tx) => {
       await tx.unsafe('SET LOCAL enable_seqscan = off');

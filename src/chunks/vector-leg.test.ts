@@ -84,6 +84,14 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
     expect(params).not.toContain('consult_questions');
   });
 
+  it('also exposes the surface predicate to generic plans with an ANN parent leg', () => {
+    const { text, params } = build({ scan: 'ann', chunkScan: undefined });
+    expect(chunkLegOf(text)).toContain("c.surface = 'consult_questions'");
+    expect(params).not.toContain('consult_questions');
+    expect(chunkLegOf(text)).toContain("JOIN harness_shared.consult_state cs ON");
+    expect(chunkLegOf(text)).toContain("cs.state = 'closed_answered'");
+  });
+
   it('reads the chunk table alone; slice membership is the join after the LIMIT (D-048)', () => {
     const leg = chunkLegOf(build({ chunkScan: 'ann' }).text);
     const inner = leg.slice(leg.indexOf('FROM (SELECT'), leg.indexOf(') hit'));
@@ -230,6 +238,12 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
 
   it('refuses a surface name that cannot be inlined as a literal', () => {
     expect(() => build({ chunkScan: 'ann', surface: { ...SURFACE, surface: "x' OR '1'='1" } })).toThrow(
+      /cannot be inlined as a SQL literal/,
+    );
+  });
+
+  it('validates the literal in the default ANN chunk path too', () => {
+    expect(() => build({ scan: 'ann', surface: { ...SURFACE, surface: "x' OR '1'='1" } })).toThrow(
       /cannot be inlined as a SQL literal/,
     );
   });
