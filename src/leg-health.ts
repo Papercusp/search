@@ -49,6 +49,8 @@ export const LEG_HEALTH_CAPACITY = 512;
 /** One recorded search outcome. Deliberately tiny — this is written on every search. */
 export interface LegSample {
   atMs: number;
+  /** Opaque per-search key used to join this verdict to its invocation receipt. */
+  correlationId?: string;
   degraded: boolean;
   semanticBlocked: boolean;
   lexicalBlocked: boolean;
@@ -138,11 +140,17 @@ export function summariseLegSamples(
 }
 
 /** Reduce the authoritative verdict; an optional host sink observes the same sample. */
-export function sampleOfLegs(legs: SearchLegs, atMs: number, observeFallback?: (sample: LegSample) => void): LegSample {
+export function sampleOfLegs(
+  legs: SearchLegs,
+  atMs: number,
+  observeFallback?: (sample: LegSample) => void,
+  correlationId?: string,
+): LegSample {
   const lexicalRan = legs.lexical.status === 'ran';
   const semanticRan = legs.semantic.status === 'ran';
   const sample = {
     atMs,
+    ...(correlationId ? { correlationId } : {}),
     degraded: legs.degraded,
     semanticBlocked: legs.semantic.blocked !== null,
     lexicalBlocked: legs.lexical.blocked !== null,
@@ -165,9 +173,9 @@ export function sampleOfLegs(legs: SearchLegs, atMs: number, observeFallback?: (
  *
  * Never throws: an instrumentation fault must not fail a search.
  */
-export function observeLegs(legs: SearchLegs, nowMs: number = Date.now()): SearchLegs {
+export function observeLegs(legs: SearchLegs, nowMs: number = Date.now(), correlationId?: string): SearchLegs {
   try {
-    const sample = sampleOfLegs(legs, nowMs, state.observer ?? undefined);
+    const sample = sampleOfLegs(legs, nowMs, state.observer ?? undefined, correlationId);
     state.ring[state.next] = sample;
     state.next = (state.next + 1) % LEG_HEALTH_CAPACITY;
     state.count += 1;
