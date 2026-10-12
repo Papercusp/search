@@ -282,6 +282,20 @@ describe('observeLegs / readLegHealth', () => {
       expect(legHealthObservedCount()).toBe(1);
     });
 
+    it('forwards the invocation correlation id into the exact leg-health sample', async () => {
+      const sink = vi.fn();
+      const correlationId = '64eab084-4e87-4e2b-99bd-3be2eb7c191f';
+      setLegHealthObserver(sink);
+      await runHybridSearch([source('a', true)], {
+        ...baseCtx,
+        mode: 'hybrid',
+        embedder,
+        correlationId,
+      });
+      expect(sink).toHaveBeenCalledTimes(1);
+      expect(sink.mock.calls[0]?.[0]).toMatchObject({ correlationId });
+    });
+
     it('records the DEGRADED verdict when the embedder dies mid-search', async () => {
       // The live 2026-08-16 signature: the query embedder blows its budget, the
       // semantic leg never runs, and the search silently returns lexical-only.

@@ -48,6 +48,8 @@ export interface SearchContext {
   scopeFilter: string | null;
   /** Final result cap (sources may over-fetch internally). */
   limit: number;
+  /** Opaque per-invocation UUID forwarded to the exact leg-health observation. */
+  correlationId?: string;
   /** Optional structured filters threaded to every source (P-002; sources opt in). */
   filters?: SearchFilters;
   /** Optional abort signal (e.g. a route timeout watchdog, or a client that
@@ -1073,6 +1075,8 @@ export async function runHybridSearch(
     applied,
     legs: observeLegs(
       summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic)),
+      Date.now(),
+      ctx.correlationId,
     ),
   };
 }
