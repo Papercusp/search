@@ -696,6 +696,71 @@ export async function runHybridSearch(
       : { lexicalAnchorDfBudget: ctx.lexicalAnchorDfBudget }),
   });
 
+  let queryVec: number[] | null = null;
+  // Independent retrieval stages overlap, but inputs are recorded below in
+  // lexical/semantic order so completion timing cannot change fusion ties.
+  const semanticListsP = (async (): Promise<Array<Listing | null>> => {
+    if (embedP) {
+      try {
+        queryVec = await embedP;
+      } catch (err) {
+        // A route-abort outranks the timeout: rethrow so a cancelled search
+        // rejects. An EmbedTimeoutError or a genuine embedder failure is caught
+        // here → queryVec stays null → BM25-only degrade (embedderAvailable=false).
+        if (ctx.signal?.aborted) throw err;
+        // P-020: the semantic leg WAS wanted (an embedder is configured) but
+        // could not be attempted at all. That is `blocked` — distinct from a
+        // source call failing, and it must not read as `not-run`, which means
+        // "never wanted" and would make a dead embedder look like a plain
+        // lexical-only search.
+        legs.semantic.attempted = true;
+        legs.semantic.blocked = `query embed failed: ${(err as Error).message}`;
+        ctx.log?.(
+          `search:semantic query embed failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    if (!queryVec) return sources.map(() => null);
+    const qVec = `[${queryVec.join(",")}]`;
+    return Promise.all(
+      sources.map(async (source) => {
+        // A source with no embedding query has no semantic leg to attempt.
+        // Leaving `attempted` false here is what makes "no registered source
+        // implements one" report `not-run` instead of a phantom failure.
+        if (!source.embedding) {
+          legs.semantic.sourceCalls.push({ source: source.name, ranker: 'embeddings', status: 'not-run',
+            rows: null, durationMs: 0, reason: 'source has no embedding query' });
+          return null;
+        }
+        ctx.signal?.throwIfAborted();
+        legs.semantic.attempted = true;
+        try {
+          const listing = await sourceQuery(legs.semantic, source, 'embeddings', ctx, (signal) => source.embedding!({
+            ...sourceParams(source),
+            signal,
+            qVec,
+          }), result => result.length);
+          legs.semantic.callsRun++;
+          return listing;
+        } catch (err) {
+          if (ctx.signal?.aborted) throw err;
+          legs.semantic.callsFailed++;
+          legs.semantic.failures.push({
+            source: source.name,
+            ranker: "embeddings",
+            error: (err as Error).message,
+          });
+          ctx.log?.(`embed ${source.name} skipped: ${(err as Error).message}`);
+          return null;
+        }
+      }),
+    );
+  })();
+  // An abort during lexical retrieval may reject before this promise is
+  // re-awaited. Observe it immediately; awaiting still propagates the error.
+  semanticListsP.catch(() => {});
+
   // Fresh-candidate window (RecencyRank.freshWindowMs): when the recency
   // re-rank is active, ALSO fetch a BM25 candidate list restricted to the
   // recent window, as one more RRF input. Without it, the re-rank can only
@@ -891,63 +956,8 @@ export async function runHybridSearch(
     }
   }
 
-  let queryVec: number[] | null = null;
-  if (embedP) {
-    try {
-      queryVec = await embedP;
-    } catch (err) {
-      // A route-abort outranks the timeout: rethrow so a cancelled search
-      // rejects. An EmbedTimeoutError or a genuine embedder failure is caught
-      // here → queryVec stays null → BM25-only degrade (embedderAvailable=false).
-      if (ctx.signal?.aborted) throw err;
-      // P-020: the semantic leg WAS wanted (an embedder is configured) but
-      // could not be attempted at all. That is `blocked` — distinct from a
-      // source call failing, and it must not read as `not-run`, which means
-      // "never wanted" and would make a dead embedder look like a plain
-      // lexical-only search.
-      legs.semantic.attempted = true;
-      legs.semantic.blocked = `query embed failed: ${(err as Error).message}`;
-      ctx.log?.(
-        `search:semantic query embed failed: ${(err as Error).message}`,
-      );
-    }
-  }
-
+  const embedLists = await semanticListsP;
   if (queryVec) {
-    const qVec = `[${queryVec.join(",")}]`;
-    const embedLists = await Promise.all(
-      sources.map(async (source) => {
-        // A source with no embedding query has no semantic leg to attempt.
-        // Leaving `attempted` false here is what makes "no registered source
-        // implements one" report `not-run` instead of a phantom failure.
-        if (!source.embedding) {
-          legs.semantic.sourceCalls.push({ source: source.name, ranker: 'embeddings', status: 'not-run',
-            rows: null, durationMs: 0, reason: 'source has no embedding query' });
-          return null;
-        }
-        ctx.signal?.throwIfAborted();
-        legs.semantic.attempted = true;
-        try {
-          const listing = await sourceQuery(legs.semantic, source, 'embeddings', ctx, (signal) => source.embedding!({
-            ...sourceParams(source),
-            signal,
-            qVec,
-          }), result => result.length);
-          legs.semantic.callsRun++;
-          return listing;
-        } catch (err) {
-          if (ctx.signal?.aborted) throw err;
-          legs.semantic.callsFailed++;
-          legs.semantic.failures.push({
-            source: source.name,
-            ranker: "embeddings",
-            error: (err as Error).message,
-          });
-          ctx.log?.(`embed ${source.name} skipped: ${(err as Error).message}`);
-          return null;
-        }
-      }),
-    );
     for (let i = 0; i < sources.length; i++) {
       const list = embedLists[i];
       if (!list) continue;

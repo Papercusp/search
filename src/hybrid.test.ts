@@ -80,6 +80,26 @@ const baseCtx: SearchContext = {
   limit: 5,
 };
 
+it('starts semantic retrieval while the independent lexical query is still pending', async () => {
+  let releaseLexical!: () => void;
+  const pendingLexical = new Promise<void>(resolve => { releaseLexical = resolve; });
+  const embedding = vi.fn(async () => listing(hit('s', 'vector', 0.9)));
+  const source: SearchSource = {
+    name: 's',
+    lexical: async () => { await pendingLexical; return listing(hit('s', 'lexical', 1)); },
+    embedding,
+  };
+  const result = runHybridSearch([source], { ...baseCtx, mode: 'hybrid',
+    embedder: async () => [1, 0], queryVector: [1, 0] });
+  try {
+    await vi.waitFor(() => expect(embedding).toHaveBeenCalledTimes(1));
+  } finally {
+    releaseLexical();
+    await result;
+  }
+  expect((await result).results.map(r => r.source_id)).toEqual(['lexical', 'vector']);
+});
+
 describe('per-source execution receipts and deadlines', () => {
   it('retains a healthy hit when a sibling never settles and cancels that sibling', async () => {
     let stalledSignal: AbortSignal | undefined;
