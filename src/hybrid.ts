@@ -30,6 +30,7 @@ import {
   summariseLegs,
   type SearchLegs,
   type LegAccumulator,
+  type SourceCallInstrumentation,
 } from "./legs";
 import { observeLegs } from "./leg-health";
 import {
@@ -75,6 +76,11 @@ export interface SearchContext {
   embedTimeoutMs?: number;
   /** Bound each source call independently; a stalled source cannot erase healthy siblings. */
   sourceTimeoutMs?: number;
+  /** Optional host instrumentation wrapped around each exact SearchSource/ranker call. */
+  sourceCallInstrumentation?: (
+    source: string,
+    ranker: string,
+  ) => SourceCallInstrumentation | undefined;
   /** A caller-owned query vector that has already been computed. When present,
    *  the semantic leg consumes it directly and does not invoke `embedder`.
    *  This is the native alternative to wrapping an embedder in a one-shot
@@ -222,6 +228,25 @@ async function sourceQuery<T>(
   const started = Date.now();
   const bounded = Number.isFinite(ctx.sourceTimeoutMs) && ctx.sourceTimeoutMs! > 0;
   const abort = bounded ? new AbortController() : null;
+  let sourceCallInstrumentation: SourceCallInstrumentation | undefined;
+  try {
+    sourceCallInstrumentation = ctx.sourceCallInstrumentation?.(source.name, ranker);
+  } catch {
+    // Optional instrumentation is best-effort; it cannot block retrieval.
+  }
+  let instrumentationFinished = false;
+  const finishInstrumentation = (outcome: 'fulfilled' | 'rejected') => {
+    if (!sourceCallInstrumentation || instrumentationFinished) return undefined;
+    instrumentationFinished = true;
+    try {
+      return sourceCallInstrumentation.finish(outcome);
+    } catch {
+      return undefined;
+    }
+  };
+  const invoke = (signal: AbortSignal | undefined) => sourceCallInstrumentation
+    ? sourceCallInstrumentation.run(() => run(signal))
+    : run(signal);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   try {
@@ -234,14 +259,18 @@ async function sourceQuery<T>(
         abort!.abort(error);
         reject(error);
       }, ctx.sourceTimeoutMs);
-      Promise.resolve().then(() => run(abort!.signal)).then(resolve, reject);
-    }) : await run(ctx.signal);
+      Promise.resolve().then(() => invoke(abort!.signal)).then(resolve, reject);
+    }) : await invoke(ctx.signal);
+    const queryDiagnostics = finishInstrumentation('fulfilled');
     leg.sourceCalls.push({ source: source.name, ranker, status: 'ran', rows: rows(value),
+      ...(queryDiagnostics ? { queryDiagnostics } : {}),
       durationMs: Date.now() - started, reason: null });
     return value;
   } catch (error) {
+    const queryDiagnostics = finishInstrumentation('rejected');
     leg.sourceCalls.push({ source: source.name, ranker,
       status: error instanceof SourceTimeoutError ? 'timed-out' : 'errored', rows: null,
+      ...(queryDiagnostics ? { queryDiagnostics } : {}),
       durationMs: Date.now() - started, reason: String((error as Error)?.message ?? error) });
     throw error;
   } finally {

@@ -64,6 +64,34 @@ export interface LegFailure {
   error: string;
 }
 
+/** One terminal Postgres result correlated to an exact source-call attempt. */
+export interface SourceCallQueryDiagnostic {
+  connectionId: number;
+  queryId: number;
+  backendPid: number | null;
+  elapsedMs: number | null;
+  preBuildMs: number | null;
+  status: 'ok' | 'error';
+}
+
+/** Bounded, host-supplied PG evidence for one SearchSource/ranker invocation. */
+export interface SourceCallQueryDiagnostics {
+  attemptId: string;
+  timing: 'query-build-to-terminal-not-acquisition';
+  /** The PG registry reports completed results only; an empty list is not proof no SQL started. */
+  coverage: 'completed-query-results-only';
+  snapshotCapacity: number;
+  /** Process-wide ring evictions at capture time; not a per-attempt loss count. */
+  snapshotDropped: number;
+  queries: SourceCallQueryDiagnostic[];
+}
+
+/** Optional wrapper around one source call; hosts use it to carry local correlation context. */
+export interface SourceCallInstrumentation {
+  run<T>(action: () => Promise<T>): Promise<T>;
+  finish(outcome: 'fulfilled' | 'rejected'): SourceCallQueryDiagnostics | undefined;
+}
+
 /** One source invocation, including successful empty and deliberately skipped calls. */
 export interface SourceCallReport {
   source: string;
@@ -73,6 +101,8 @@ export interface SourceCallReport {
   rows: number | null;
   durationMs: number;
   reason: string | null;
+  /** Optional exact-attempt PG query evidence, supplied by the host. */
+  queryDiagnostics?: SourceCallQueryDiagnostics;
 }
 
 /** What one ranking leg actually did during a search. */

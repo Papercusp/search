@@ -25,6 +25,7 @@ import type {
   PgHandle,
   Embedder,
 } from "./types";
+import type { SourceCallInstrumentation } from "./legs";
 
 // The doubles never call SQL — a structural placeholder is enough.
 const sql = {} as PgHandle;
@@ -101,6 +102,37 @@ it('starts semantic retrieval while the independent lexical query is still pendi
 });
 
 describe('per-source execution receipts and deadlines', () => {
+  it('attaches query diagnostics from the exact source-call instrumentation', async () => {
+    const queryDiagnostics = {
+      attemptId: 'attempt-session-turn-1',
+      timing: 'query-build-to-terminal-not-acquisition' as const,
+      coverage: 'completed-query-results-only' as const,
+      snapshotCapacity: 32,
+      snapshotDropped: 0,
+      queries: [{ connectionId: 4, queryId: 91, backendPid: 113, elapsedMs: 7,
+        preBuildMs: 2, status: 'ok' as const }],
+    };
+    const instrumentation: SourceCallInstrumentation = {
+      run: <T>(action: () => Promise<T>) => action(),
+      finish: vi.fn(() => queryDiagnostics),
+    };
+    const sourceCallInstrumentation = vi.fn(() => instrumentation);
+    const out = await runHybridSearch([fakeSource('session_turn', {
+      lexical: [hit('session_turn', 'turn-1', 1)],
+    })], {
+      ...baseCtx,
+      mode: 'hybrid',
+      embedder: null,
+      lexicalCascade: false,
+      sourceCallInstrumentation,
+    });
+
+    const sourceCall = out.legs.lexical.sourceCalls?.find(call => call.source === 'session_turn');
+    expect(sourceCall?.queryDiagnostics).toEqual(queryDiagnostics);
+    expect(sourceCallInstrumentation).toHaveBeenCalledWith('session_turn', 'lexical');
+    expect(instrumentation.finish).toHaveBeenCalledWith('fulfilled');
+  });
+
   it('retains a healthy hit when a sibling never settles and cancels that sibling', async () => {
     let stalledSignal: AbortSignal | undefined;
     const stalled: SearchSource = { name: 'plan', lexical: async (params) => {

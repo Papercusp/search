@@ -54,6 +54,10 @@ export {
   type LegStatus,
   type LegFailure,
   type LegReport,
+  type SourceCallQueryDiagnostic,
+  type SourceCallQueryDiagnostics,
+  type SourceCallInstrumentation,
+  type SourceCallReport,
   type SearchLegs,
   type LegAccumulator,
 } from './legs';
