@@ -73,7 +73,9 @@ function fakeDb(tables: Record<string, FakeTable>, opts: { vector?: boolean } = 
       if (query.trimStart().startsWith('SELECT')) {
         const limit = Number(params[0]);
         const offset = Number(params[params.length - 1]);
-        const pending = t.rows.filter((r) => r.stale && r.body.length > 0);
+        // Rows are stored oldest first; a DESC order (freshest-first) reads them reversed.
+        const eligible = t.rows.filter((r) => r.stale && r.body.length > 0);
+        const pending = /ORDER BY \S+ DESC/.test(query) ? eligible.reverse() : eligible;
         return Promise.resolve(pending.slice(offset, offset + limit).map((r) => ({ k0: r.key, body: r.body })) as T);
       }
       if (query.trimStart().startsWith('UPDATE')) {
@@ -273,6 +275,44 @@ describe('backfillTable', () => {
     });
     expect(embed).toHaveBeenCalledTimes(2);
     expect(log.lines[0]).toContain('batch embed returned 1 vectors for 2 texts (s.t)');
+  });
+
+  it('a backlog order spends its share on the OLDEST stale rows, which freshest-first alone never reaches (WI-6554700010009707)', async () => {
+    const twenty = () => rows(...Array.from({ length: 20 }, (_, i) => `turn ${i}`));
+    const embedded = (t: FakeTable) => t.rows.filter((r) => !r.stale).map((r) => r.key);
+    const opts = { ...base, batchSize: 4, maxRows: 8, embed: vec3 };
+
+    const freshOnly: FakeTable = { rows: twenty() };
+    await backfillTable(fakeDb({ 's.t': freshOnly }).sql, target('s.t', { orderBySql: 'ts DESC' }), opts);
+    expect(embedded(freshOnly)).toEqual(['r12', 'r13', 'r14', 'r15', 'r16', 'r17', 'r18', 'r19']);
+
+    const lanes: FakeTable = { rows: twenty() };
+    const s = await backfillTable(
+      fakeDb({ 's.t': lanes }).sql,
+      target('s.t', { orderBySql: 'ts DESC', backlogOrderBySql: 'ts ASC', backlogShare: 0.25 }),
+      opts,
+    );
+    // 8 rows: 6 freshest by the main order, then 2 oldest by the backlog order.
+    expect(embedded(lanes)).toEqual(['r0', 'r1', 'r14', 'r15', 'r16', 'r17', 'r18', 'r19']);
+    expect(s).toMatchObject({ scanned: 8, embedded: 8, errors: 0 });
+  });
+
+  it('a stalled main lane does not cancel the backlog share, and each lane offsets past only its own failures', async () => {
+    const t: FakeTable = { rows: rows('old ok', 'old ok2', 'new bad', 'new bad2') };
+    const embed = vi.fn(async (text: string) => {
+      if (text.includes('bad')) throw new Error('rejected');
+      return [1, 2, 3];
+    });
+    const db = fakeDb({ 's.t': t });
+    const s = await backfillTable(
+      db.sql,
+      target('s.t', { orderBySql: 'ts DESC', backlogOrderBySql: 'ts ASC', backlogShare: 0.5 }),
+      { ...base, batchSize: 2, maxRows: 4, embed },
+    );
+    expect(t.rows.filter((r) => !r.stale).map((r) => r.key)).toEqual(['r0', 'r1']);
+    expect(s).toMatchObject({ scanned: 4, embedded: 2, errors: 2 });
+    const selects = db.calls.filter((c) => c.query.trimStart().startsWith('SELECT'));
+    expect(selects.map((c) => [/ORDER BY \S+ (\w+)/.exec(c.query)?.[1], c.params.at(-1)])).toEqual([['DESC', 0], ['ASC', 0]]);
   });
 
   it('skips failed rows by OFFSET on the next pull and stops when a pull makes no progress', async () => {

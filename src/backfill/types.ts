@@ -19,6 +19,9 @@ import type { PgHandle } from '../types';
  */
 export type BackfillSql = Pick<PgHandle, 'unsafe'>;
 
+/** Default share of a call's row budget spent on `backlogOrderBySql`. */
+export const DEFAULT_BACKLOG_SHARE = 0.25;
+
 /** One table whose vector column the engine keeps filled. */
 export interface BackfillTarget {
   /** Schema-qualified table name, e.g. `app.notes`. */
@@ -36,6 +39,18 @@ export interface BackfillTarget {
   /** `ORDER BY` body (without the keyword): the drain order, e.g. `created_at DESC`.
    * Name an indexed column so the pull is an index scan. Omitted ⇒ unordered. */
   orderBySql?: string;
+  /**
+   * A second drain order for the BACKLOG, usually the reverse of `orderBySql`
+   * (e.g. `created_at ASC`). Set it when rows can arrive faster than one pass
+   * embeds them: a freshest-first drain alone then never reaches the oldest stale
+   * rows, so they starve for good (WI-6554700010009707: 95k session turns, the
+   * oldest five days stale). When set, each call spends `backlogShare` of its
+   * row budget in this order, after the main order's share.
+   */
+  backlogOrderBySql?: string;
+  /** Fraction (0-1) of each call's `maxRows` reserved for `backlogOrderBySql`.
+   * Default {@link DEFAULT_BACKLOG_SHARE}. Ignored without `backlogOrderBySql`. */
+  backlogShare?: number;
   /** The column recording when a row was WRITTEN, for recent-coverage reads. */
   recencyCol?: string;
   /** How `recencyCol` compares to now(): a timestamptz, or bigint epoch milliseconds. */

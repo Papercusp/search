@@ -22,6 +22,7 @@ import type {
   BackfillStats,
   BackfillTarget,
 } from './types';
+import { DEFAULT_BACKLOG_SHARE } from './types';
 
 /** Texts per batch-embed call. Small on purpose: a timed-out chunk loses only
  * its own rows, which then take the per-row path; earlier chunks are kept. */
@@ -178,114 +179,143 @@ export async function backfillTable<P extends BackfillProfile = BackfillProfile>
   // them, stay stale, so with a stable order they would head every later pull.
   // OFFSET by their running count skips exactly them. A value cursor on the order
   // column would instead skip every row tied with the boundary value.
-  let failedSoFar = 0;
   let warnedBatchFallback = false;
-  const orderBy = target.orderBySql ? ` ORDER BY ${target.orderBySql}` : '';
-  while (stats.scanned < maxRows) {
-    const wantRows = Math.min(batchSize, maxRows - stats.scanned);
-    const batch = await sql.unsafe<Array<Record<string, string>>>(
-      `SELECT ${keySelect}, (${target.bodySql}) AS body
-         FROM ${target.table}
-        WHERE ${stale}
-          AND ${eligiblePredicateSql(target)}${orderBy}
-        LIMIT $1 OFFSET ${selOffsetExpr}`,
-      [wantRows, ...labelParams, failedSoFar],
-    );
-    if (!batch.length) break;
-    const texts = batch.map((r) => truncateToChars(r.body, maxInputChars));
+  // Each lane drains in its own order up to its share of `maxRows`. A lane that runs
+  // dry or stalls ends only itself: the backlog lane still gets its share, which is
+  // the whole point of it (WI-6554700010009707).
+  for (const lane of drainLanes(target, maxRows)) {
+    let failedSoFar = 0;
+    const orderBy = lane.orderBySql ? ` ORDER BY ${lane.orderBySql}` : '';
+    while (stats.scanned < lane.scanUntil) {
+      const wantRows = Math.min(batchSize, lane.scanUntil - stats.scanned);
+      const batch = await sql.unsafe<Array<Record<string, string>>>(
+        `SELECT ${keySelect}, (${target.bodySql}) AS body
+           FROM ${target.table}
+          WHERE ${stale}
+            AND ${eligiblePredicateSql(target)}${orderBy}
+          LIMIT $1 OFFSET ${selOffsetExpr}`,
+        [wantRows, ...labelParams, failedSoFar],
+      );
+      if (!batch.length) break;
+      const texts = batch.map((r) => truncateToChars(r.body, maxInputChars));
 
-    // Batch path, in chunks. A null entry sends that one row down the per-row path.
-    let batchVectors: Array<number[] | null> | null = null;
-    if (embedMany && batch.length > 1) {
-      const acc: Array<number[] | null> = new Array<number[] | null>(texts.length).fill(null);
-      const { observeFallback } = options;
-      let eligible = 0;
-      for (let off = 0; off < texts.length; off += batchChunkSize) {
-        const count = Math.min(batchChunkSize, texts.length - off);
-        if (count < 2) break;
-        eligible += count;
-      }
-      let reason = 'batch-applied';
-      let anyChunkOk = false;
-      for (let off = 0; off < texts.length; off += batchChunkSize) {
-        const slice = texts.slice(off, off + batchChunkSize);
-        // A lone trailing row IS the per-row path.
-        if (slice.length < 2) break;
-        try {
-          const vecs = await withDeadline(embedMany(slice), batchTimeoutMs(slice.length), 'embed_batch');
-          if (vecs.length !== slice.length) {
-            reason = 'batch-cardinality-mismatch';
-            // A contract breach, not a transient failure: say so.
-            logger.warn(
-              `[${logLabel}] batch embed returned ${vecs.length} vectors for ` +
-                `${slice.length} texts (${target.table}) — falling back to per-row`,
-            );
+      // Batch path, in chunks. A null entry sends that one row down the per-row path.
+      let batchVectors: Array<number[] | null> | null = null;
+      if (embedMany && batch.length > 1) {
+        const acc: Array<number[] | null> = new Array<number[] | null>(texts.length).fill(null);
+        const { observeFallback } = options;
+        let eligible = 0;
+        for (let off = 0; off < texts.length; off += batchChunkSize) {
+          const count = Math.min(batchChunkSize, texts.length - off);
+          if (count < 2) break;
+          eligible += count;
+        }
+        let reason = 'batch-applied';
+        let anyChunkOk = false;
+        for (let off = 0; off < texts.length; off += batchChunkSize) {
+          const slice = texts.slice(off, off + batchChunkSize);
+          // A lone trailing row IS the per-row path.
+          if (slice.length < 2) break;
+          try {
+            const vecs = await withDeadline(embedMany(slice), batchTimeoutMs(slice.length), 'embed_batch');
+            if (vecs.length !== slice.length) {
+              reason = 'batch-cardinality-mismatch';
+              // A contract breach, not a transient failure: say so.
+              logger.warn(
+                `[${logLabel}] batch embed returned ${vecs.length} vectors for ` +
+                  `${slice.length} texts (${target.table}) — falling back to per-row`,
+              );
+              break;
+            }
+            for (let j = 0; j < vecs.length; j++) acc[off + j] = vecs[j]!;
+            anyChunkOk = true;
+          } catch (err) {
+            reason = 'batch-failed';
+            // Never silent: an always-failing batch path looks exactly like a working
+            // one from outside, only slower.
+            if (!warnedBatchFallback) {
+              warnedBatchFallback = true;
+              logger.warn(
+                `[${logLabel}] batch embed FAILED for ${target.table}, using the ` +
+                  `per-row path (slower). First error: ${(err as Error).message}`,
+              );
+            }
+            // The embedder is slower than the budget now; the next chunk would pay the
+            // same timeout. The rest of this batch takes the per-row path.
             break;
           }
-          for (let j = 0; j < vecs.length; j++) acc[off + j] = vecs[j]!;
-          anyChunkOk = true;
-        } catch (err) {
-          reason = 'batch-failed';
-          // Never silent: an always-failing batch path looks exactly like a working
-          // one from outside, only slower.
-          if (!warnedBatchFallback) {
-            warnedBatchFallback = true;
-            logger.warn(
-              `[${logLabel}] batch embed FAILED for ${target.table}, using the ` +
-                `per-row path (slower). First error: ${(err as Error).message}`,
-            );
-          }
-          // The embedder is slower than the budget now; the next chunk would pay the
-          // same timeout. The rest of this batch takes the per-row path.
-          break;
         }
+        const applied = acc.filter((vector) => vector !== null).length;
+        if (reason === 'batch-applied' && applied < eligible) reason = 'batch-partial';
+        if (eligible > 0) {
+          try { observeFallback?.({ eligible, applied, reason, scope: target.table }); }
+          catch { /* A host observer must not fail the backfill. */ }
+        }
+        batchVectors = anyChunkOk ? acc : null;
       }
-      const applied = acc.filter((vector) => vector !== null).length;
-      if (reason === 'batch-applied' && applied < eligible) reason = 'batch-partial';
-      if (eligible > 0) {
-        try { observeFallback?.({ eligible, applied, reason, scope: target.table }); }
-        catch { /* A host observer must not fail the backfill. */ }
-      }
-      batchVectors = anyChunkOk ? acc : null;
-    }
 
-    let embeddedThisBatch = 0;
-    let failedThisBatch = 0;
-    let skippedThisBatch = 0;
-    for (const [i, row] of batch.entries()) {
-      stats.scanned += 1;
-      try {
-        const vec = batchVectors?.[i] ?? (await withDeadline(embed(texts[i]!), rowTimeoutMs, 'embed'));
-        if (!acceptsWidth(vec.length)) {
+      let embeddedThisBatch = 0;
+      let failedThisBatch = 0;
+      let skippedThisBatch = 0;
+      for (const [i, row] of batch.entries()) {
+        stats.scanned += 1;
+        try {
+          const vec = batchVectors?.[i] ?? (await withDeadline(embed(texts[i]!), rowTimeoutMs, 'embed'));
+          if (!acceptsWidth(vec.length)) {
+            stats.errors += 1;
+            failedThisBatch += 1;
+            continue;
+          }
+          const keyVals = keyCols.map((_, k) => row[`k${k}`]);
+          // By key, under the staleness guard: a row another sweep already brought
+          // current is left alone. Vector and labels are written together.
+          const written = await sql.unsafe(updateSql, [`[${vec.join(',')}]`, ...labelParams, ...keyVals]);
+          if (affectedRows(written) === 0) {
+            // Held by another writer, or already brought current by one.
+            stats.writeSkipped += 1;
+            skippedThisBatch += 1;
+            continue;
+          }
+          stats.embedded += 1;
+          embeddedThisBatch += 1;
+        } catch {
           stats.errors += 1;
           failedThisBatch += 1;
-          continue;
         }
-        const keyVals = keyCols.map((_, k) => row[`k${k}`]);
-        // By key, under the staleness guard: a row another sweep already brought
-        // current is left alone. Vector and labels are written together.
-        const written = await sql.unsafe(updateSql, [`[${vec.join(',')}]`, ...labelParams, ...keyVals]);
-        if (affectedRows(written) === 0) {
-          // Held by another writer, or already brought current by one.
-          stats.writeSkipped += 1;
-          skippedThisBatch += 1;
-          continue;
-        }
-        stats.embedded += 1;
-        embeddedThisBatch += 1;
-      } catch {
-        stats.errors += 1;
-        failedThisBatch += 1;
       }
+      failedSoFar += failedThisBatch + skippedThisBatch;
+      // Nothing in this batch written: what remains is persistent failure, or rows a
+      // long writer still holds. Stop; a later pull retries them.
+      if (embeddedThisBatch === 0) break;
     }
-    failedSoFar += failedThisBatch + skippedThisBatch;
-    // Nothing in this batch written: what remains is persistent failure, or rows a
-    // long writer still holds. Stop; a later pull retries them.
-    if (embeddedThisBatch === 0) break;
   }
 
   stats.durationMs = Date.now() - started;
   return stats;
+}
+
+/** One drain order and the running `scanned` total it may fill up to. */
+interface DrainLane {
+  orderBySql: string | undefined;
+  scanUntil: number;
+}
+
+/**
+ * The drain lanes for one call: the target's main order, then (when it declares
+ * one) its backlog order with `backlogShare` of the budget. The main lane keeps at
+ * least one row and the backlog lane gets at least one, so rounding at a small
+ * `maxRows` cannot starve either order.
+ */
+export function drainLanes(target: BackfillTarget, maxRows: number): DrainLane[] {
+  if (!target.backlogOrderBySql || maxRows < 2) {
+    return [{ orderBySql: target.orderBySql, scanUntil: maxRows }];
+  }
+  const share = Math.min(1, Math.max(0, target.backlogShare ?? DEFAULT_BACKLOG_SHARE));
+  const backlogRows = Math.min(maxRows - 1, Math.max(1, Math.floor(maxRows * share)));
+  return [
+    { orderBySql: target.orderBySql, scanUntil: maxRows - backlogRows },
+    { orderBySql: target.backlogOrderBySql, scanUntil: maxRows },
+  ];
 }
 
 /** Rows a write changed: postgres.js's `count`. A client that reports none (a test
