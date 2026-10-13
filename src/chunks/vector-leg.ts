@@ -140,6 +140,15 @@ export interface ChunkAwareVectorLegOptions {
    * Default `limit`.
    */
   chunkCandidates?: number;
+  /**
+   * Use halfvec expression indexes for ANN candidate selection, then rerank
+   * each leg using its ORIGINAL vector before pooling. Requires matching
+   * `(<column>::halfvec(dimensions)) halfvec_cosine_ops` indexes. This changes
+   * approximate candidate membership, never the reported distance or filters.
+   * Only the all-ANN path supports it; `limit` must cover the requested rows.
+   * The caller must qualify recall on its corpus before adopting this option.
+   */
+  halfvecCandidates?: { dimensions: number; limit: number };
 }
 
 /** One pooled row. Key columns are present under their own names. */
@@ -228,6 +237,24 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
   if (!Number.isInteger(chunkCandidates) || chunkCandidates <= 0) {
     throw new Error('chunk vector leg: chunkCandidates must be a positive integer');
   }
+  const half = opts.halfvecCandidates;
+  if (half) {
+    if (exact || chunkScan !== 'ann') {
+      throw new Error("chunk vector leg: halfvecCandidates requires scan 'ann' and chunkScan 'ann'");
+    }
+    if (!Number.isInteger(half.dimensions) || half.dimensions < 1 || half.dimensions > 4000) {
+      throw new Error('chunk vector leg: halfvec dimensions must be an integer between 1 and 4000');
+    }
+    if (!Number.isInteger(half.limit) || half.limit < opts.limit) {
+      throw new Error('chunk vector leg: halfvec candidate limit must be an integer >= limit');
+    }
+    if (keys.some(k => k.column === 'chunk_leg_candidate_vector' || k.column === 'matched_anchor')) {
+      throw new Error('chunk vector leg: halfvec candidate key uses a reserved column');
+    }
+  }
+  // The validated dimension is a literal so expression indexes also match a
+  // generic prepared plan; query vectors and candidate counts remain bound.
+  const halfType = half ? sql.unsafe(`halfvec(${half.dimensions})`) : sql``;
 
   const filter = opts.parentFilter ?? sql`TRUE`;
   const space = opts.spaceFilter ?? (() => sql`TRUE`);
@@ -261,7 +288,18 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
   const parentSource = sql.unsafe(`${exact ? SLICE_CTE : parentTable} ${alias}`);
   const parentWhere = exact ? sql`TRUE` : filter;
 
-  const parentLeg = exact
+  const parentLeg = half
+    ? sql`
+    (SELECT ${keySelect}, ${sql.unsafe(`${alias}.chunk_leg_candidate_vector`)} <=> ${q}::vector AS distance,
+            NULL::text AS matched_anchor, 0 AS leg
+       FROM (SELECT ${keySelect}, ${sql.unsafe(parentVec)} AS chunk_leg_candidate_vector
+               FROM ${sql.unsafe(`${parentTable} ${alias}`)}
+              WHERE (${filter}) AND ${sql.unsafe(parentVec)} IS NOT NULL AND (${parentSpace})
+           ORDER BY ${sql.unsafe(parentVec)}::${halfType} <=> ${q}::${halfType}
+              LIMIT ${half.limit}) ${sql.unsafe(alias)}
+   ORDER BY distance, ${keySelect}
+      LIMIT ${opts.limit})`
+    : exact
     ? sql`
     (SELECT ${keySelect}, ${sliceDistance} AS distance,
             NULL::text AS matched_anchor, 0 AS leg
@@ -354,6 +392,21 @@ export function chunkAwareVectorLegSql(sql: PgHandle, opts: ChunkAwareVectorLegO
            ORDER BY distance
               LIMIT ${chunkCandidates}) hit
        JOIN ${sql.unsafe(`${SLICE_CTE} ${alias}`)} ON hit.parent_key = ${sql.unsafe(sliceKey)})`;
+    } else if (half) {
+      legs = sql`${parentLeg}
+    UNION ALL
+    (SELECT ${keySelect}, (${sql.unsafe(`${alias}.chunk_leg_candidate_vector`)} <=> ${q}::vector) + ${margin}::float8 AS distance,
+            ${sql.unsafe(`${alias}.matched_anchor`)}, 1 AS leg
+       FROM (SELECT ${keySelect}, ${sql.unsafe(emb)} AS chunk_leg_candidate_vector,
+                    ${sql.unsafe(anchor)} AS matched_anchor
+               FROM ${sql.unsafe(table)} ${sql.unsafe(CHUNK_ALIAS)}
+               JOIN ${parentSource} ON ${sql.unsafe(join)}
+              WHERE ${surfaceMatch} (${parentWhere}) AND ${sql.unsafe(emb)} IS NOT NULL
+                AND (${space({ profileColumn: profile, modeColumn: modeCol })})
+           ORDER BY ${sql.unsafe(emb)}::${halfType} <=> ${q}::${halfType}
+              LIMIT ${half.limit}) ${sql.unsafe(alias)}
+   ORDER BY distance, ${keySelect}
+      LIMIT ${opts.limit})`;
     } else {
       // 'exact' orders by the output distance, which adds the margin: an HNSW
       // index can only serve `ORDER BY <column> <=> <query>` itself, so this sort is

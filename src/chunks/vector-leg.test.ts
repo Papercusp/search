@@ -247,4 +247,18 @@ describe("chunkAwareVectorLegSql chunkScan 'ann' over an exact slice (D-046)", (
       /cannot be inlined as a SQL literal/,
     );
   });
+
+  it('rejects halfvec dimensions and candidate bounds before building an index expression', () => {
+    const half = { dimensions: 768, limit: 30 };
+    expect(() => build({ halfvecCandidates: half })).toThrow(/requires scan 'ann'/);
+    for (const dimensions of [0, 1.5, 4001, NaN]) {
+      expect(() => build({ scan: 'ann', halfvecCandidates: { ...half, dimensions } })).toThrow(/halfvec dimensions/);
+    }
+    for (const limit of [0, 6, 7.5, NaN]) {
+      expect(() => build({ scan: 'ann', limit: 7, halfvecCandidates: { ...half, limit } })).toThrow(/candidate limit/);
+    }
+    expect(() => build({ scan: 'ann', halfvecCandidates: half, surface: {
+      ...SURFACE, parent: { ...SURFACE.parent, key: ['chunk_leg_candidate_vector'] },
+    } })).toThrow(/reserved column/);
+  });
 });
