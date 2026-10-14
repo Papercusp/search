@@ -147,15 +147,6 @@
     },
     {
       "fn": "proseProfilePredicateSql",
-      "file": "packages/operator-core/lib/datatype-registry-store.ts",
-      "args": "'embedding_profile' | 'embedding_mode'",
-      "literal": {
-        "profileColumn": "embedding_profile",
-        "modeColumn": "embedding_mode"
-      }
-    },
-    {
-      "fn": "proseProfilePredicateSql",
       "file": "packages/operator-core/lib/events/await/interest-watch.ts",
       "args": "'text_embedding_profile' | 'text_embedding_mode'",
       "literal": {
