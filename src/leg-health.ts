@@ -54,6 +54,10 @@ export interface LegSample {
   degraded: boolean;
   semanticBlocked: boolean;
   lexicalBlocked: boolean;
+  /** At least one semantic source call threw (including partial source failure). */
+  semanticSourceFailed: boolean;
+  /** At least one lexical source call threw (including partial source failure). */
+  lexicalSourceFailed: boolean;
   /** Leg ran but put nothing into fusion while the other leg worked. */
   semanticEmpty: boolean;
   lexicalEmpty: boolean;
@@ -98,6 +102,8 @@ export interface LegHealthWindow {
   degradedRate: number | null;
   semanticBlocked: number;
   lexicalBlocked: number;
+  semanticSourceFailed: number;
+  lexicalSourceFailed: number;
   semanticEmpty: number;
   lexicalEmpty: number;
   oldestSampleMs: number | null;
@@ -131,6 +137,8 @@ export function summariseLegSamples(
     degradedRate: searches === 0 ? null : degraded / searches,
     semanticBlocked: inWindow.filter((s) => s.semanticBlocked).length,
     lexicalBlocked: inWindow.filter((s) => s.lexicalBlocked).length,
+    semanticSourceFailed: inWindow.filter((s) => s.semanticSourceFailed).length,
+    lexicalSourceFailed: inWindow.filter((s) => s.lexicalSourceFailed).length,
     semanticEmpty: inWindow.filter((s) => s.semanticEmpty).length,
     lexicalEmpty: inWindow.filter((s) => s.lexicalEmpty).length,
     oldestSampleMs: oldest,
@@ -154,6 +162,8 @@ export function sampleOfLegs(
     degraded: legs.degraded,
     semanticBlocked: legs.semantic.blocked !== null,
     lexicalBlocked: legs.lexical.blocked !== null,
+    semanticSourceFailed: legs.semantic.failures.length > 0,
+    lexicalSourceFailed: legs.lexical.failures.length > 0,
     // "Empty" only counts when the OTHER leg worked — mirroring summariseLegs'
     // asymmetric rule. Both legs empty is a query with no matches, not a fault.
     semanticEmpty: semanticRan && legs.semantic.candidates === 0 && lexicalRan && legs.lexical.candidates > 0,
