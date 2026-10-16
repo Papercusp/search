@@ -57,6 +57,25 @@ describe('sampleOfLegs', () => {
     expect(s.degraded).toBe(true);
     expect(s.semanticBlocked).toBe(true);
     expect(s.lexicalBlocked).toBe(false);
+    expect(s.semanticSourceFailed).toBe(false);
+    expect(s.lexicalSourceFailed).toBe(false);
+  });
+
+  it('records a partial source failure separately from a blocked leg', () => {
+    const s = sampleOfLegs(
+      summariseLegs(
+        leg(),
+        leg({
+          failures: [{ source: 'semantic-source', ranker: 'semantic', error: 'vector query timed out' }],
+          callsFailed: 1,
+        }),
+      ),
+      NOW,
+    );
+    expect(s.degraded).toBe(true);
+    expect(s.semanticBlocked).toBe(false);
+    expect(s.semanticSourceFailed).toBe(true);
+    expect(s.lexicalSourceFailed).toBe(false);
   });
 
   it('records a healthy search as not degraded', () => {
@@ -101,6 +120,8 @@ describe('summariseLegSamples', () => {
     degraded: false,
     semanticBlocked: false,
     lexicalBlocked: false,
+    semanticSourceFailed: false,
+    lexicalSourceFailed: false,
     semanticEmpty: false,
     lexicalEmpty: false,
     ...over,
@@ -110,7 +131,7 @@ describe('summariseLegSamples', () => {
     const out = summariseLegSamples(
       [
         s(NOW - 1000, { degraded: true, semanticBlocked: true }),
-        s(NOW - 2000, { degraded: true, semanticBlocked: true }),
+        s(NOW - 2000, { degraded: true, semanticBlocked: true, semanticSourceFailed: true }),
         s(NOW - 3000),
         s(NOW - 4000),
       ],
@@ -122,6 +143,8 @@ describe('summariseLegSamples', () => {
     expect(out.degraded).toBe(2);
     expect(out.degradedRate).toBe(0.5);
     expect(out.semanticBlocked).toBe(2);
+    expect(out.semanticSourceFailed).toBe(1);
+    expect(out.lexicalSourceFailed).toBe(0);
   });
 
   it('excludes samples older than the window', () => {
