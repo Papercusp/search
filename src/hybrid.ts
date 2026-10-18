@@ -446,6 +446,8 @@ export async function runFullTextSearch(
     // running at half strength?".
     legs: observeLegs(
       summariseLegs(finaliseLeg(lexicalLeg), finaliseLeg(semanticLeg)),
+      Date.now(),
+      ctx.correlationId,
     ),
   };
 }

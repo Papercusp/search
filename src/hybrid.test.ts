@@ -17,6 +17,7 @@ import {
   runHybridSearch,
   type SearchContext,
 } from "./hybrid";
+import { setLegHealthObserver } from "./leg-health";
 import type {
   SearchSource,
   SearchSourceParams,
@@ -1353,6 +1354,21 @@ describe("P-001 — rankerScores provenance (pre-fusion native scores)", () => {
     const a = fakeSource("A", { lexical: [hit("A", "1", 0.42)] });
     const res = await runFullTextSearch([a], baseCtx);
     expect(res.results[0]?.rankerScores).toEqual({ lexical: 0.42 });
+  });
+
+  it("runFullTextSearch forwards the invocation correlation id to leg health", async () => {
+    const observer = vi.fn();
+    const correlationId = "64eab084-4e87-4e2b-99bd-3be2eb7c191f";
+    setLegHealthObserver(observer);
+    try {
+      await runFullTextSearch([fakeSource("A", { lexical: [hit("A", "1", 1)] })], {
+        ...baseCtx,
+        correlationId,
+      });
+    } finally {
+      setLegHealthObserver(null);
+    }
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({ correlationId }));
   });
 });
 
