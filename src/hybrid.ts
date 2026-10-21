@@ -237,7 +237,8 @@ async function sourceQuery<T>(
     // Optional instrumentation is best-effort; it cannot block retrieval.
   }
   let instrumentationFinished = false;
-  const finishInstrumentation = (outcome: 'fulfilled' | 'rejected') => {
+  let timeoutDiagnostics: ReturnType<SourceCallInstrumentation['finish']>;
+  const finishInstrumentation = (outcome: 'fulfilled' | 'rejected' | 'timed-out') => {
     if (!sourceCallInstrumentation || instrumentationFinished) return undefined;
     instrumentationFinished = true;
     try {
@@ -258,6 +259,7 @@ async function sourceQuery<T>(
       ctx.signal?.addEventListener('abort', onAbort, { once: true });
       timer = setTimeout(() => {
         const error = new SourceTimeoutError(ctx.sourceTimeoutMs!);
+        timeoutDiagnostics = finishInstrumentation('timed-out');
         abort!.abort(error);
         reject(error);
       }, ctx.sourceTimeoutMs);
@@ -269,7 +271,7 @@ async function sourceQuery<T>(
       durationMs: Date.now() - started, reason: null });
     return value;
   } catch (error) {
-    const queryDiagnostics = finishInstrumentation('rejected');
+    const queryDiagnostics = timeoutDiagnostics ?? finishInstrumentation('rejected');
     leg.sourceCalls.push({ source: source.name, ranker,
       status: error instanceof SourceTimeoutError ? 'timed-out' : 'errored', rows: null,
       ...(queryDiagnostics ? { queryDiagnostics } : {}),

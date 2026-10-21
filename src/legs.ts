@@ -74,6 +74,37 @@ export interface SourceCallQueryDiagnostic {
   status: 'ok' | 'error';
 }
 
+export interface SourceCallAcquireSnapshot {
+  pool: string;
+  waiting: number;
+  oldestWaitMs: number | null;
+  held: number;
+  oldestHeldMs: number | null;
+  max: number | null;
+  totalAcquired: number;
+  lastAcquiredAgoMs: number | null;
+}
+
+export interface SourceCallAcquireTicketSnapshot {
+  pool: string;
+  capacity: number;
+  active: number;
+  omitted: number;
+  tickets: Array<{
+    state: 'waiting' | 'held';
+    ageMs: number;
+    requestId: string | null;
+    operation: string | null;
+  }>;
+}
+
+export interface SourceCallAcquisitionAtTimeout {
+  /** Captured by the host immediately before it aborts the timed-out source. */
+  timing: 'source-timeout-before-abort';
+  counters: SourceCallAcquireSnapshot;
+  tickets: SourceCallAcquireTicketSnapshot;
+}
+
 /** Bounded, host-supplied PG evidence for one SearchSource/ranker invocation. */
 export interface SourceCallQueryDiagnostics {
   attemptId: string;
@@ -84,12 +115,14 @@ export interface SourceCallQueryDiagnostics {
   /** Process-wide ring evictions at capture time; not a per-attempt loss count. */
   snapshotDropped: number;
   queries: SourceCallQueryDiagnostic[];
+  /** Bounded acquisition state sampled at the source's timeout edge, before abort. */
+  acquisitionAtTimeout?: SourceCallAcquisitionAtTimeout;
 }
 
 /** Optional wrapper around one source call; hosts use it to carry local correlation context. */
 export interface SourceCallInstrumentation {
   run<T>(action: () => Promise<T>): Promise<T>;
-  finish(outcome: 'fulfilled' | 'rejected'): SourceCallQueryDiagnostics | undefined;
+  finish(outcome: 'fulfilled' | 'rejected' | 'timed-out'): SourceCallQueryDiagnostics | undefined;
 }
 
 /** One source invocation, including successful empty and deliberately skipped calls. */
