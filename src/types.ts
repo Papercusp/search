@@ -155,6 +155,8 @@ export interface SearchSourceParams {
    *  already stops STARTING new source calls once it aborts, so ignoring
    *  this is safe (just less prompt). */
   signal?: AbortSignal;
+  /** Optional bounded timing hook for named phases inside one source call. */
+  phaseTimer?: SourceCallPhaseTimer;
   /** WI-4734 highlight-deferral: when the engine passes `false`, the source MAY
    *  skip its (expensive) highlight expression and return `highlight: ''` for
    *  every row — the engine hydrates highlights AFTER fusion, for the final
@@ -203,6 +205,14 @@ export interface SearchSourceParams {
    * (the degenerate case), which is what a paired control arm passes.
    */
   lexicalAnchorDfBudget?: number;
+}
+
+export type SourceCallPhaseOutcome = 'fulfilled' | 'rejected';
+
+/** Host-created phase timer; unfinished phases are snapshotted at the source timeout edge. */
+export interface SourceCallPhaseTimer {
+  start(name: string): (outcome?: SourceCallPhaseOutcome) => void;
+  measure<T>(name: string, action: () => Promise<T>): Promise<T>;
 }
 
 /**
