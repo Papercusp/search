@@ -18,6 +18,7 @@ import type {
   PgHandle,
   Embedder,
   SearchFilters,
+  SourceCallPhaseTimer,
 } from "./types";
 import { applyRecencyRerank, type RecencyRank } from "./recency";
 import { applyMinScore, type MinScoreFloors } from "./min-score";
@@ -31,6 +32,7 @@ import {
   type SearchLegs,
   type LegAccumulator,
   type SourceCallInstrumentation,
+  type SourceCallPhaseTiming,
 } from "./legs";
 import { observeLegs } from "./leg-health";
 import {
@@ -222,10 +224,14 @@ class SourceTimeoutError extends Error {
   }
 }
 
+const MAX_SOURCE_PHASE_TIMINGS = 8;
+const MAX_SOURCE_PHASE_NAME_LENGTH = 64;
+
 /** Record execution where it happens, and cancel the source when its own budget expires. */
 async function sourceQuery<T>(
   leg: LegAccumulator, source: SearchSource, ranker: string, ctx: SearchContext,
-  run: (signal: AbortSignal | undefined) => Promise<T>, rows: (value: T) => number,
+  run: (signal: AbortSignal | undefined, phaseTimer: SourceCallPhaseTimer) => Promise<T>,
+  rows: (value: T) => number,
 ): Promise<T> {
   const started = Date.now();
   const bounded = Number.isFinite(ctx.sourceTimeoutMs) && ctx.sourceTimeoutMs! > 0;
@@ -237,19 +243,62 @@ async function sourceQuery<T>(
     // Optional instrumentation is best-effort; it cannot block retrieval.
   }
   let instrumentationFinished = false;
+  let phasesClosed = false;
+  const phaseTimings: SourceCallPhaseTiming[] = [];
+  const activePhases = new Map<string, number>();
+  const phaseTimer: SourceCallPhaseTimer = {
+    start(name) {
+      const boundedName = name.trim().slice(0, MAX_SOURCE_PHASE_NAME_LENGTH) || 'unnamed';
+      if (phasesClosed || phaseTimings.length + activePhases.size >= MAX_SOURCE_PHASE_TIMINGS) {
+        return () => {};
+      }
+      const startedAt = Date.now();
+      activePhases.set(boundedName, startedAt);
+      let ended = false;
+      return (phaseOutcome = 'fulfilled') => {
+        if (ended) return;
+        ended = true;
+        const started = activePhases.get(boundedName);
+        activePhases.delete(boundedName);
+        if (phasesClosed || started === undefined || phaseTimings.length >= MAX_SOURCE_PHASE_TIMINGS) return;
+        phaseTimings.push({ name: boundedName, durationMs: Math.max(0, Date.now() - started), status: phaseOutcome });
+      };
+    },
+    async measure<TPhase>(name: string, action: () => Promise<TPhase>): Promise<TPhase> {
+      const finish = this.start(name);
+      try {
+        const value = await action();
+        finish('fulfilled');
+        return value;
+      } catch (error) {
+        finish('rejected');
+        throw error;
+      }
+    },
+  };
   let timeoutDiagnostics: ReturnType<SourceCallInstrumentation['finish']>;
   const finishInstrumentation = (outcome: 'fulfilled' | 'rejected' | 'timed-out') => {
     if (!sourceCallInstrumentation || instrumentationFinished) return undefined;
     instrumentationFinished = true;
+    phasesClosed = true;
+    const timeoutStatus = outcome === 'timed-out' ? 'pending-at-timeout' : 'rejected';
+    for (const [name, startedAt] of activePhases) {
+      if (phaseTimings.length >= MAX_SOURCE_PHASE_TIMINGS) break;
+      phaseTimings.push({ name, durationMs: Math.max(0, Date.now() - startedAt), status: timeoutStatus });
+    }
+    activePhases.clear();
     try {
-      return sourceCallInstrumentation.finish(outcome);
+      const diagnostics = sourceCallInstrumentation.finish(outcome);
+      return diagnostics && phaseTimings.length > 0
+        ? { ...diagnostics, phaseTimings: [...(diagnostics.phaseTimings ?? []), ...phaseTimings] }
+        : diagnostics;
     } catch {
       return undefined;
     }
   };
   const invoke = (signal: AbortSignal | undefined) => sourceCallInstrumentation
-    ? sourceCallInstrumentation.run(() => run(signal))
-    : run(signal);
+    ? sourceCallInstrumentation.run(() => run(signal, phaseTimer))
+    : run(signal, phaseTimer);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   try {
@@ -376,7 +425,7 @@ export async function runFullTextSearch(
       // empty AND query returns an EMPTY PAGE. Measured on the live corpus, the
       // AND leg returns zero rows for 30% of 1-2 term, 50% of 3-14 term and 70%
       // of 15+ term REAL queries (D-056).
-      const { listing, stage2Added } = await sourceQuery(lexicalLeg, source, 'lexical', ctx, (signal) => lexicalWithCascade(
+      const { listing, stage2Added } = await sourceQuery(lexicalLeg, source, 'lexical', ctx, (signal, phaseTimer) => lexicalWithCascade(
         source,
         {
           sql: ctx.sql,
@@ -386,6 +435,7 @@ export async function runFullTextSearch(
           limit: ctx.limit,
           filters: ctx.filters,
           signal,
+          phaseTimer,
           ...(ctx.lexicalMode && ctx.lexicalMode !== "and"
             ? { lexicalMode: ctx.lexicalMode }
             : {}),
@@ -702,7 +752,7 @@ export async function runHybridSearch(
     }
     inputs.push({ name: ranker, list, ...(rankOffset ? { rankOffset } : {}) });
   };
-  const sourceParams = (source: SearchSource): SearchSourceParams => ({
+  const sourceParams = (source: SearchSource, phaseTimer?: SourceCallPhaseTimer): SearchSourceParams => ({
     sql: ctx.sql,
     query: ctx.query,
     workspaceId: ctx.workspaceId,
@@ -711,6 +761,7 @@ export async function runHybridSearch(
     limit: candidateLimit,
     filters: ctx.filters,
     signal: ctx.signal,
+    ...(phaseTimer ? { phaseTimer } : {}),
     // Only defer for a source that can hydrate afterwards; others keep inline
     // highlights so mixed-source calls stay correct.
     ...(ctx.deferHighlight && source.hydrateHighlights
@@ -771,8 +822,8 @@ export async function runHybridSearch(
         ctx.signal?.throwIfAborted();
         legs.semantic.attempted = true;
         try {
-          const listing = await sourceQuery(legs.semantic, source, 'embeddings', ctx, (signal) => source.embedding!({
-            ...sourceParams(source),
+          const listing = await sourceQuery(legs.semantic, source, 'embeddings', ctx, (signal, phaseTimer) => source.embedding!({
+            ...sourceParams(source, phaseTimer),
             signal,
             qVec,
           }), result => result.length);
@@ -849,17 +900,18 @@ export async function runHybridSearch(
         // second query per source for rows the main leg's own cascade already
         // reaches.
         if (since) {
-          const listing = await sourceQuery(leg, source, label, ctx, (signal) => source.lexical({
+          const listing = await sourceQuery(leg, source, label, ctx, (signal, phaseTimer) => source.lexical({
             ...params,
             signal,
+            phaseTimer,
             filters: { ...params.filters, since },
           }), result => result.length);
           leg.callsRun++;
           return listing;
         }
-        const { listing, stage2Added } = await sourceQuery(leg, source, label, ctx, (signal) => lexicalWithCascade(
+        const { listing, stage2Added } = await sourceQuery(leg, source, label, ctx, (signal, phaseTimer) => lexicalWithCascade(
           source,
-          { ...params, signal },
+          { ...params, signal, phaseTimer },
           {
             enabled: ctx.lexicalCascade !== false,
             callerSetMode: ctx.lexicalMode !== undefined,

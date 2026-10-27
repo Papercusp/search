@@ -134,6 +134,56 @@ describe('per-source execution receipts and deadlines', () => {
     expect(instrumentation.finish).toHaveBeenCalledWith('fulfilled');
   });
 
+  it('captures the phase pending at the source timeout before aborting the source', async () => {
+    let sourceSignal: AbortSignal | undefined;
+    let signalAbortedAtFinish: boolean | undefined;
+    const queryDiagnostics = {
+      attemptId: 'attempt-report-1',
+      timing: 'query-build-to-terminal-not-acquisition' as const,
+      coverage: 'completed-query-results-only' as const,
+      snapshotCapacity: 32,
+      snapshotDropped: 0,
+      queries: [],
+    };
+    const instrumentation: SourceCallInstrumentation = {
+      run: action => action(),
+      finish: vi.fn((outcome: 'fulfilled' | 'rejected' | 'timed-out') => {
+        signalAbortedAtFinish = sourceSignal?.aborted;
+        expect(outcome).toBe('timed-out');
+        return queryDiagnostics;
+      }),
+    };
+    const source: SearchSource = {
+      name: 'report',
+      lexical: async params => {
+        sourceSignal = params.signal;
+        await params.phaseTimer?.measure('report-library-enabled-check', async () => true);
+        params.phaseTimer?.start('report-lexical-sql');
+        return await new Promise<Listing>(() => {});
+      },
+    };
+    const result = await runFullTextSearch([source], {
+      ...baseCtx,
+      lexicalCascade: false,
+      sourceTimeoutMs: 25,
+      sourceCallInstrumentation: () => instrumentation,
+    });
+    const sourceCall = result.legs.lexical.sourceCalls?.find(call => call.source === 'report');
+
+    expect(sourceCall).toMatchObject({
+      status: 'timed-out',
+      queryDiagnostics: {
+        phaseTimings: [
+          { name: 'report-library-enabled-check', status: 'fulfilled', durationMs: expect.any(Number) },
+          { name: 'report-lexical-sql', status: 'pending-at-timeout', durationMs: expect.any(Number) },
+        ],
+      },
+    });
+    expect(instrumentation.finish).toHaveBeenCalledWith('timed-out');
+    expect(signalAbortedAtFinish).toBe(false);
+    expect(sourceSignal?.aborted).toBe(true);
+  });
+
   it('retains a healthy hit when a sibling never settles and cancels that sibling', async () => {
     let stalledSignal: AbortSignal | undefined;
     const stalled: SearchSource = { name: 'plan', lexical: async (params) => {
