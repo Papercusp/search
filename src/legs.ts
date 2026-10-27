@@ -69,6 +69,7 @@ export interface SourceCallQueryDiagnostic {
   connectionId: number;
   queryId: number;
   backendPid: number | null;
+  queryFamily: string;
   elapsedMs: number | null;
   preBuildMs: number | null;
   status: 'ok' | 'error';
