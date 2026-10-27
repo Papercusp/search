@@ -106,6 +106,13 @@ export interface SourceCallAcquisitionAtTimeout {
   tickets: SourceCallAcquireTicketSnapshot;
 }
 
+/** One bounded phase inside a source invocation. */
+export interface SourceCallPhaseTiming {
+  name: string;
+  durationMs: number;
+  status: 'fulfilled' | 'rejected' | 'pending-at-timeout';
+}
+
 /** Bounded, host-supplied PG evidence for one SearchSource/ranker invocation. */
 export interface SourceCallQueryDiagnostics {
   attemptId: string;
@@ -118,6 +125,8 @@ export interface SourceCallQueryDiagnostics {
   queries: SourceCallQueryDiagnostic[];
   /** Bounded acquisition state sampled at the source's timeout edge, before abort. */
   acquisitionAtTimeout?: SourceCallAcquisitionAtTimeout;
+  /** Bounded internal source phases, including the phase pending when a source timed out. */
+  phaseTimings?: SourceCallPhaseTiming[];
 }
 
 /** Optional wrapper around one source call; hosts use it to carry local correlation context. */
