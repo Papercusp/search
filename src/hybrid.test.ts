@@ -110,7 +110,7 @@ describe('per-source execution receipts and deadlines', () => {
       coverage: 'completed-query-results-only' as const,
       snapshotCapacity: 32,
       snapshotDropped: 0,
-      queries: [{ connectionId: 4, queryId: 91, backendPid: 113, elapsedMs: 7,
+      queries: [{ connectionId: 4, queryId: 91, backendPid: 113, queryFamily: 'session_turn.lexical', elapsedMs: 7,
         preBuildMs: 2, status: 'ok' as const }],
     };
     const instrumentation: SourceCallInstrumentation = {
