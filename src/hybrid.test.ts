@@ -1420,6 +1420,25 @@ describe("P-001 — rankerScores provenance (pre-fusion native scores)", () => {
     }
     expect(observer).toHaveBeenCalledWith(expect.objectContaining({ correlationId }));
   });
+
+  it("runHybridSearch forwards the caller label to leg health", async () => {
+    const observer = vi.fn();
+    setLegHealthObserver(observer);
+    try {
+      await runHybridSearch([fakeSource("A", { lexical: [hit("A", "1", 1)] })], {
+        ...baseCtx,
+        mode: "hybrid",
+        caller: "docs:search",
+        embedder: async () => { throw new Error("embedder down"); },
+      });
+    } finally {
+      setLegHealthObserver(null);
+    }
+    expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+      caller: "docs:search",
+      semanticBlocked: true,
+    }));
+  });
 });
 
 // ── P-020: the per-leg execution report is WIRED, not just typed ────────────

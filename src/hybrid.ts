@@ -500,6 +500,7 @@ export async function runFullTextSearch(
       summariseLegs(finaliseLeg(lexicalLeg), finaliseLeg(semanticLeg)),
       Date.now(),
       ctx.correlationId,
+      ctx.caller,
     ),
   };
 }
@@ -1133,6 +1134,7 @@ export async function runHybridSearch(
       summariseLegs(finaliseLeg(legs.lexical), finaliseLeg(legs.semantic)),
       Date.now(),
       ctx.correlationId,
+      ctx.caller,
     ),
   };
 }

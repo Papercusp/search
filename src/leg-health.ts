@@ -51,6 +51,8 @@ export interface LegSample {
   atMs: number;
   /** Opaque per-search key used to join this verdict to its invocation receipt. */
   correlationId?: string;
+  /** Stable search-surface label used to keep durable degradation windows per caller. */
+  caller?: string;
   degraded: boolean;
   semanticBlocked: boolean;
   lexicalBlocked: boolean;
@@ -153,12 +155,14 @@ export function sampleOfLegs(
   atMs: number,
   observeFallback?: (sample: LegSample) => void,
   correlationId?: string,
+  caller?: string,
 ): LegSample {
   const lexicalRan = legs.lexical.status === 'ran';
   const semanticRan = legs.semantic.status === 'ran';
   const sample = {
     atMs,
     ...(correlationId ? { correlationId } : {}),
+    ...(caller ? { caller } : {}),
     degraded: legs.degraded,
     semanticBlocked: legs.semantic.blocked !== null,
     lexicalBlocked: legs.lexical.blocked !== null,
@@ -183,9 +187,14 @@ export function sampleOfLegs(
  *
  * Never throws: an instrumentation fault must not fail a search.
  */
-export function observeLegs(legs: SearchLegs, nowMs: number = Date.now(), correlationId?: string): SearchLegs {
+export function observeLegs(
+  legs: SearchLegs,
+  nowMs: number = Date.now(),
+  correlationId?: string,
+  caller?: string,
+): SearchLegs {
   try {
-    const sample = sampleOfLegs(legs, nowMs, state.observer ?? undefined, correlationId);
+    const sample = sampleOfLegs(legs, nowMs, state.observer ?? undefined, correlationId, caller);
     state.ring[state.next] = sample;
     state.next = (state.next + 1) % LEG_HEALTH_CAPACITY;
     state.count += 1;

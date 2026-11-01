@@ -61,6 +61,11 @@ describe('sampleOfLegs', () => {
     expect(s.lexicalSourceFailed).toBe(false);
   });
 
+  it('preserves the originating caller for scoped degradation tracking', () => {
+    const s = sampleOfLegs(semanticBlockedLegs(), NOW, undefined, undefined, 'docs:search');
+    expect(s).toMatchObject({ caller: 'docs:search', semanticBlocked: true });
+  });
+
   it('records a partial source failure separately from a blocked leg', () => {
     const s = sampleOfLegs(
       summariseLegs(
