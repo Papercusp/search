@@ -184,6 +184,65 @@ describe('per-source execution receipts and deadlines', () => {
     expect(sourceSignal?.aborted).toBe(true);
   });
 
+  it('captures source diagnostics before propagating a parent deadline abort', async () => {
+    const parent = new AbortController();
+    let sourceSignal: AbortSignal | undefined;
+    let signalAbortedAtFinish: boolean | undefined;
+    let markStarted!: () => void;
+    const sourceStarted = new Promise<void>(resolve => { markStarted = resolve; });
+    const queryDiagnostics = {
+      attemptId: 'attempt-report-parent-timeout',
+      timing: 'query-build-to-terminal-not-acquisition' as const,
+      coverage: 'completed-query-results-only' as const,
+      snapshotCapacity: 32,
+      snapshotDropped: 0,
+      queries: [],
+      acquisitionAtTimeout: {
+        timing: 'source-timeout-before-abort' as const,
+        counters: { pool: 'org-admin', waiting: 1, held: 4, max: 12, oldestWaitMs: 35 },
+        tickets: { pool: 'org-admin', capacity: 8, active: 1, omitted: 0, tickets: [
+          { state: 'waiting' as const, ageMs: 35, requestId: null, operation: 'memory-corpus-search' },
+        ] },
+      },
+    };
+    const instrumentation: SourceCallInstrumentation = {
+      run: action => action(),
+      finish: vi.fn((outcome: 'fulfilled' | 'rejected' | 'timed-out') => {
+        signalAbortedAtFinish = sourceSignal?.aborted;
+        expect(outcome).toBe('timed-out');
+        return queryDiagnostics;
+      }),
+    };
+    const source: SearchSource = {
+      name: 'report',
+      lexical: async params => {
+        sourceSignal = params.signal;
+        markStarted();
+        return await new Promise<Listing>((_, reject) => {
+          if (params.signal?.aborted) {
+            reject(params.signal.reason);
+            return;
+          }
+          params.signal?.addEventListener('abort', () => reject(params.signal?.reason), { once: true });
+        });
+      },
+    };
+    const search = runFullTextSearch([source], {
+      ...baseCtx,
+      signal: parent.signal,
+      lexicalCascade: false,
+      sourceTimeoutMs: 1_000,
+      sourceCallInstrumentation: () => instrumentation,
+    });
+    await sourceStarted;
+    parent.abort(new Error('corpus deadline'));
+
+    await expect(search).rejects.toThrow('corpus deadline');
+    expect(instrumentation.finish).toHaveBeenCalledWith('timed-out');
+    expect(signalAbortedAtFinish).toBe(false);
+    expect(sourceSignal?.aborted).toBe(true);
+  });
+
   it('retains a healthy hit when a sibling never settles and cancels that sibling', async () => {
     let stalledSignal: AbortSignal | undefined;
     const stalled: SearchSource = { name: 'plan', lexical: async (params) => {

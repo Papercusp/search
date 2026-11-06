@@ -304,7 +304,16 @@ async function sourceQuery<T>(
   try {
     ctx.signal?.throwIfAborted();
     const value = bounded ? await new Promise<T>((resolve, reject) => {
-      onAbort = () => { abort!.abort(ctx.signal?.reason); reject(ctx.signal?.reason ?? new Error('aborted')); };
+      onAbort = () => {
+        const reason = ctx.signal?.reason ?? new Error('aborted');
+        // A parent deadline is also a timeout edge for the source diagnostics.
+        // Capture acquisition state before aborting the child signal; otherwise
+        // the host later labels this call timed-out while instrumentation sees
+        // only an ordinary rejection and omits its timeout snapshot.
+        timeoutDiagnostics = finishInstrumentation('timed-out');
+        abort!.abort(reason);
+        reject(reason);
+      };
       ctx.signal?.addEventListener('abort', onAbort, { once: true });
       timer = setTimeout(() => {
         const error = new SourceTimeoutError(ctx.sourceTimeoutMs!);
